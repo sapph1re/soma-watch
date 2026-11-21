@@ -1,5 +1,8 @@
 package com.aisling.somawatch
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -8,11 +11,12 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import androidx.core.app.NotificationCompat
 
 class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-        Log.i("SomaWatchUpdate", "Package replaced -> relaunching WearMainActivity (v${BuildConfig.VERSION_NAME})")
+        Log.i(TAG, "Package replaced -> launching/notifying WearMainActivity (v${BuildConfig.VERSION_NAME})")
 
         runCatching {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -23,15 +27,57 @@ class PackageReplacedReceiver : BroadcastReceiver() {
                 context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
             vibrator.vibrate(
-                VibrationEffect.createWaveform(longArrayOf(0, 80, 70, 120), -1)
+                VibrationEffect.createWaveform(longArrayOf(0, 80, 70, 140), -1)
             )
         }
 
         val launchIntent = Intent(context, WearMainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("just_updated", true)
         }
+
+        // Try direct launch (succeeds if exempted from BAL)
         runCatching { context.startActivity(launchIntent) }
-            .onFailure { Log.w("SomaWatchUpdate", "Could not auto-relaunch activity: ${it.localizedMessage}") }
+            .onFailure { Log.w(TAG, "Direct BAL launch restricted: ${it.localizedMessage}") }
+
+        // Always post a high-priority Full-Screen Intent notification so Android 16 wakes Soma Watch immediately
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Обновления Soma Watch",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Мгновенное открытие Soma Watch после OTA-обновления"
+                enableVibration(true)
+            }
+            nm.createNotificationChannel(channel)
+
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                1001,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                .setContentTitle("Soma Watch обновлён!")
+                .setContentText("Версия v${BuildConfig.VERSION_NAME} — нажми, чтобы открыть")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, true)
+                .build()
+
+            nm.notify(NOTIF_ID, notification)
+        }.onFailure { Log.e(TAG, "Failed posting update notification", it) }
+    }
+
+    companion object {
+        private const val TAG = "SomaWatchUpdate"
+        private const val CHANNEL_ID = "soma_ota_updates"
+        private const val NOTIF_ID = 8008
     }
 }

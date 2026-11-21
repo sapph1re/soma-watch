@@ -50,6 +50,15 @@ class WearDataLayerService : WearableListenerService() {
                 vibrate(160)
                 SomaWearState.recordJulesResult(payload)
             }
+            "/soma/voice_transcribed" -> {
+                vibrate(90)
+                if (payload.startsWith("ERR:")) {
+                    SomaWearState.updateStatus(payload.removePrefix("ERR:").trim())
+                } else {
+                    SomaWearState.updateStatus("Gemini расшифровал:")
+                    SomaWearState.setPendingVoicePrompt(payload)
+                }
+            }
         }
     }
 

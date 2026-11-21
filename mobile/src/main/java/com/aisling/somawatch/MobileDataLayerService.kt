@@ -1,6 +1,7 @@
 package com.aisling.somawatch
 
 import android.util.Log
+import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
@@ -9,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.io.File
 
 class MobileDataLayerService : WearableListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,6 +54,66 @@ class MobileDataLayerService : WearableListenerService() {
                                 msg.toByteArray(Charsets.UTF_8)
                             ).await()
                     }
+                }
+            }
+        }
+    }
+
+    override fun onChannelOpened(channel: ChannelClient.Channel) {
+        super.onChannelOpened(channel)
+        if (channel.path == "/soma/voice_audio") {
+            Log.i(TAG, "Receiving voice audio from watch for Gemini transcription...")
+            SomaMobileState.setJulesStatus("Приём аудио с Galaxy Watch 8...")
+            scope.launch {
+                val audioFile = File(cacheDir, "wrist_voice_prompt.m4a")
+                try {
+                    if (audioFile.exists()) audioFile.delete()
+                    val inputStream = Wearable.getChannelClient(this@MobileDataLayerService)
+                        .getInputStream(channel)
+                        .await()
+                    inputStream.use { input ->
+                        audioFile.outputStream().use { output ->
+                            input.copyTo(output)
+                            output.flush()
+                        }
+                    }
+
+                    val sizeKb = audioFile.length() / 1024
+                    SomaMobileState.setJulesStatus("Аудио ($sizeKb KB) → Gemini 2.5 Flash...")
+                    val result = GeminiVoiceClient.transcribeAudio(this@MobileDataLayerService, audioFile)
+
+                    val replyPayload = result.fold(
+                        onSuccess = { text ->
+                            SomaMobileState.recordWatchMessage("Gemini: «$text»")
+                            SomaMobileState.setJulesStatus("Расшифровано → ждём подтверждения 🚀 на часах")
+                            text
+                        },
+                        onFailure = { err ->
+                            val msg = err.localizedMessage ?: "Ошибка Gemini"
+                            SomaMobileState.setJulesStatus("Ошибка Gemini: $msg")
+                            "ERR:$msg"
+                        }
+                    )
+
+                    Wearable.getMessageClient(this@MobileDataLayerService)
+                        .sendMessage(
+                            channel.nodeId,
+                            "/soma/voice_transcribed",
+                            replyPayload.toByteArray(Charsets.UTF_8)
+                        ).await()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed receiving/transcribing watch audio", e)
+                    SomaMobileState.setJulesStatus("Ошибка аудио: ${e.localizedMessage}")
+                    runCatching {
+                        Wearable.getMessageClient(this@MobileDataLayerService)
+                            .sendMessage(
+                                channel.nodeId,
+                                "/soma/voice_transcribed",
+                                "ERR:${e.localizedMessage}".toByteArray(Charsets.UTF_8)
+                            ).await()
+                    }
+                } finally {
+                    runCatching { audioFile.delete() }
                 }
             }
         }

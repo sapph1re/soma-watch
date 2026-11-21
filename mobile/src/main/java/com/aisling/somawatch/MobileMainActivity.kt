@@ -80,6 +80,8 @@ fun SomaCompanionScreen() {
     var promptDraft by remember { mutableStateOf("") }
     var tokenInput by remember { mutableStateOf(GitHubJulesClient.getSavedToken(context)) }
     var tokenSavedNotice by remember { mutableStateOf(tokenInput.isNotEmpty()) }
+    var geminiKeyInput by remember { mutableStateOf(GeminiVoiceClient.getSavedApiKey(context)) }
+    var geminiSavedNotice by remember { mutableStateOf(geminiKeyInput.isNotEmpty()) }
 
     val speechLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -205,20 +207,32 @@ fun SomaCompanionScreen() {
                     singleLine = true
                 )
 
+                OutlinedTextField(
+                    value = geminiKeyInput,
+                    onValueChange = {
+                        geminiKeyInput = it
+                        geminiSavedNotice = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(if (geminiSavedNotice) "Gemini API Key (сохранён ✓)" else "Gemini API Key (для расшифровки голоса)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true
+                )
+
                 Button(
                     onClick = {
                         GitHubJulesClient.saveToken(context, tokenInput)
+                        GeminiVoiceClient.saveApiKey(context, geminiKeyInput)
                         tokenSavedNotice = tokenInput.isNotBlank()
-                        SomaMobileState.setJulesStatus(
-                            if (tokenSavedNotice) "GitHub Token сохранён локально!" else "Токен очищен"
-                        )
+                        geminiSavedNotice = geminiKeyInput.isNotBlank()
+                        SomaMobileState.setJulesStatus("Ключи сохранены локально!")
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF1E293B),
                         contentColor = Color.White
                     )
                 ) {
-                    Text("Сохранить токен")
+                    Text("Сохранить ключи")
                 }
             }
         }

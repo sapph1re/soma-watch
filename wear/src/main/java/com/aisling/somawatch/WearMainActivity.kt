@@ -1,14 +1,13 @@
 package com.aisling.somawatch
 
-import android.app.Activity
+import android.Manifest
 import android.content.Context
-import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -23,9 +22,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Button
@@ -48,8 +54,12 @@ import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
 import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,18 +87,44 @@ fun SomaDashboardScreen() {
     val isOtaBusy by SomaWearState.isOtaBusy.collectAsState()
     val pendingPrompt by SomaWearState.pendingVoicePrompt.collectAsState()
 
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spoken = matches?.firstOrNull()?.trim()
-            if (!spoken.isNullOrEmpty()) {
-                triggerVibration(context, 70)
-                SomaWearState.setPendingVoicePrompt(spoken)
-            } else {
-                SomaWearState.updateStatus("Речь не распознана")
+    val voiceRecorder = remember { WearVoiceRecorder(context) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordSeconds by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(Unit) {
+        onDispose { voiceRecorder.stopAndDiscard() }
+    }
+
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordSeconds = 0
+            while (isRecording) {
+                delay(1000L)
+                recordSeconds++
+                if (recordSeconds >= 90) {
+                    isRecording = false
+                    val file = voiceRecorder.stopAndGetFile()
+                    if (file != null) {
+                        scope.launch { sendVoiceAudioToPhone(context, file) }
+                    }
+                }
             }
+        }
+    }
+
+    val micPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            if (voiceRecorder.startRecording()) {
+                triggerVibration(context, 70)
+                isRecording = true
+                SomaWearState.updateStatus("Говори — расшифрует Gemini...")
+            } else {
+                SomaWearState.updateStatus("Ошибка микрофона")
+            }
+        } else {
+            SomaWearState.updateStatus("Нужно разрешение на микрофон")
         }
     }
 
@@ -125,7 +161,64 @@ fun SomaDashboardScreen() {
                 }
             }
 
-            if (pendingPrompt != null) {
+            if (isRecording) {
+                item {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                    ) {
+                        val mins = recordSeconds / 60
+                        val secs = recordSeconds % 60
+                        Text(
+                            text = String.format("🔴 Запись %02d:%02d", mins, secs),
+                            color = Color(0xFFF43F5E),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Диктуй задачу для Gemini + Jules",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Button(
+                                onClick = {
+                                    isRecording = false
+                                    triggerVibration(context, 90)
+                                    val file = voiceRecorder.stopAndGetFile()
+                                    if (file != null) {
+                                        scope.launch { sendVoiceAudioToPhone(context, file) }
+                                    } else {
+                                        SomaWearState.updateStatus("Запись слишком короткая")
+                                    }
+                                },
+                                colors = ButtonDefaults.primaryButtonColors(
+                                    backgroundColor = Color(0xFF10B981)
+                                )
+                            ) {
+                                Text("✓", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Button(
+                                onClick = {
+                                    isRecording = false
+                                    triggerVibration(context, 40)
+                                    voiceRecorder.stopAndDiscard()
+                                    SomaWearState.updateStatus("Запись отменена")
+                                },
+                                colors = ButtonDefaults.primaryButtonColors(
+                                    backgroundColor = Color(0xFFEF4444)
+                                )
+                            ) {
+                                Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            } else if (pendingPrompt != null) {
                 item {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -140,7 +233,7 @@ fun SomaDashboardScreen() {
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(
                                 onClick = {
                                     val text = pendingPrompt ?: return@Button
@@ -158,12 +251,13 @@ fun SomaDashboardScreen() {
                                 onClick = {
                                     triggerVibration(context, 40)
                                     SomaWearState.setPendingVoicePrompt(null)
+                                    SomaWearState.updateStatus("Отменено")
                                 },
                                 colors = ButtonDefaults.primaryButtonColors(
                                     backgroundColor = Color(0xFFEF4444)
                                 )
                             ) {
-                                Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
                     }
@@ -172,16 +266,21 @@ fun SomaDashboardScreen() {
                 item {
                     Chip(
                         onClick = {
-                            triggerVibration(context, 60)
-                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                putExtra(
-                                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                )
-                                putExtra(RecognizerIntent.EXTRA_PROMPT, "Идея для Soma Watch...")
+                            val hasMic = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasMic) {
+                                if (voiceRecorder.startRecording()) {
+                                    triggerVibration(context, 70)
+                                    isRecording = true
+                                    SomaWearState.updateStatus("Говори — расшифрует Gemini...")
+                                } else {
+                                    SomaWearState.updateStatus("Ошибка микрофона")
+                                }
+                            } else {
+                                micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
-                            runCatching { speechLauncher.launch(intent) }
-                                .onFailure { SomaWearState.updateStatus("Нет голосового ввода") }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -292,6 +391,33 @@ private fun triggerVibration(context: Context, ms: Long) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
     vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+}
+
+private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = withContext(Dispatchers.IO) {
+    try {
+        val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+        if (nodes.isEmpty()) {
+            SomaWearState.updateStatus("Телефон не найден по BT")
+            return@withContext
+        }
+        val sizeKb = audioFile.length() / 1024
+        SomaWearState.updateStatus("Отправка аудио ($sizeKb KB) в Gemini...")
+        val targetNode = nodes.first()
+        val channelClient = Wearable.getChannelClient(context)
+        val channel = channelClient.openChannel(targetNode.id, "/soma/voice_audio").await()
+        val outputStream = channelClient.getOutputStream(channel).await()
+        audioFile.inputStream().use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+                output.flush()
+            }
+        }
+        SomaWearState.updateStatus("Gemini расшифровывает...")
+    } catch (e: Exception) {
+        SomaWearState.updateStatus("Ошибка аудио: ${e.localizedMessage}")
+    } finally {
+        runCatching { audioFile.delete() }
+    }
 }
 
 private suspend fun sendVoicePromptToPhone(context: Context, prompt: String) {
