@@ -35,20 +35,64 @@ class MobileDataLayerService : WearableListenerService() {
                     )
                 }
             }
+            "/soma/workout_summary" -> {
+                val summary = MobileBiometricsStore.saveWorkoutSummary(this, payload)
+                if (summary != null) {
+                    SomaMobileState.setLastBioSummary(summary)
+                    SomaMobileState.recordWatchMessage(
+                        "Тренировка: ${summary.durationSec / 60}м • ср ${summary.avgHr} BPM • Z2 ${summary.weeklyZ2Min}/${summary.weeklyZ2Goal}м"
+                    )
+                }
+            }
+            "/soma/check_ota_version" -> {
+                val watchVersionCode = payload.trim().toIntOrNull() ?: 0
+                scope.launch {
+                    val release = GitHubOtaManager.checkLatestRelease()
+                    val reply = if (release != null && release.wearApkUrl != null && release.remoteVersionCode > watchVersionCode) {
+                        "${release.remoteVersionCode}|${release.tagName}"
+                    } else {
+                        "UP_TO_DATE"
+                    }
+                    runCatching {
+                        Wearable.getMessageClient(this@MobileDataLayerService)
+                            .sendMessage(
+                                messageEvent.sourceNodeId,
+                                "/soma/ota_available",
+                                reply.toByteArray(Charsets.UTF_8)
+                            ).await()
+                    }
+                }
+            }
             "/soma/request_ota" -> {
                 if (SomaMobileState.isBusy.value) {
                     Log.w(TAG, "Ignoring /soma/request_ota because OTA transfer is already running")
                     return
                 }
-                SomaMobileState.recordWatchMessage("Часы запросили проверку облачного OTA")
+                val watchVersionCode = payload.trim().toIntOrNull() ?: 0
+                SomaMobileState.recordWatchMessage("Часы запросили обновление OTA (текущий #$watchVersionCode)")
                 scope.launch {
                     val release = GitHubOtaManager.checkLatestRelease()
                     if (release?.wearApkUrl != null) {
-                        GitHubOtaManager.pushWearOtaToWatch(
-                            context = this@MobileDataLayerService,
-                            wearApkUrl = release.wearApkUrl,
-                            versionLabel = release.tagName
-                        )
+                        if (watchVersionCode > 0 && release.remoteVersionCode <= watchVersionCode) {
+                            Wearable.getMessageClient(this@MobileDataLayerService)
+                                .sendMessage(
+                                    messageEvent.sourceNodeId,
+                                    "/soma/ota_status",
+                                    "DONE:Актуальная версия ✓".toByteArray(Charsets.UTF_8)
+                                ).await()
+                            Wearable.getMessageClient(this@MobileDataLayerService)
+                                .sendMessage(
+                                    messageEvent.sourceNodeId,
+                                    "/soma/ota_available",
+                                    "UP_TO_DATE".toByteArray(Charsets.UTF_8)
+                                ).await()
+                        } else {
+                            GitHubOtaManager.pushWearOtaToWatch(
+                                context = this@MobileDataLayerService,
+                                wearApkUrl = release.wearApkUrl,
+                                versionLabel = release.tagName
+                            )
+                        }
                     } else {
                         val msg = "DONE:Релиз не найден в ${BuildConfig.GITHUB_REPO}"
                         Wearable.getMessageClient(this@MobileDataLayerService)

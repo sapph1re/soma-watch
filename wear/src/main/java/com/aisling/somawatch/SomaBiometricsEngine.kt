@@ -1,0 +1,442 @@
+package com.aisling.somawatch
+
+import android.content.ComponentName
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.util.Log
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import org.json.JSONObject
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
+
+enum class WorkoutPhase {
+    IDLE,
+    ACTIVE,
+    HRR_RECOVERY,
+    SUMMARY
+}
+
+data class BiometricsUiState(
+    val currentHr: Int = 0,
+    val currentZone: Int = 0, // 0 = unknown, 1..5
+    val currentHrvMs: Int? = null,
+    val hrvSource: String = "IBI",
+    val isSensorActive: Boolean = false,
+    val phase: WorkoutPhase = WorkoutPhase.IDLE,
+    val elapsedSeconds: Int = 0,
+    val peakHr: Int = 0,
+    val avgHr: Int = 0,
+    val sessionZone2Sec: Int = 0,
+    val sessionZone3Sec: Int = 0,
+    val sessionVigorousSec: Int = 0,
+    val hrHistory: List<Int> = emptyList(),
+    // HRR recovery tracking
+    val recoveryStartHr: Int = 0,
+    val recoveryElapsedSec: Int = 0,
+    val hrr1Drop: Int? = null,
+    val hrr2Drop: Int? = null,
+    // Weekly persistent budget
+    val weekly: WeeklyCardioStats = WeeklyCardioStats(
+        weekKey = "",
+        zone2Seconds = 0,
+        zone3Seconds = 0,
+        vigorousSeconds = 0,
+        zone2GoalMin = 150,
+        vigorousGoalMin = 75,
+        maxHr = 185,
+        lastHrr1 = null,
+        lastHrr2 = null,
+        lastHrvMs = null
+    )
+)
+
+object SomaBiometricsEngine : SensorEventListener {
+    private const val TAG = "SomaBiometrics"
+    private const val SAMSUNG_HR_RAW_TYPE = 69682
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _state = MutableStateFlow(BiometricsUiState())
+    val state: StateFlow<BiometricsUiState> = _state
+
+    private var appContext: Context? = null
+    private var sensorManager: SensorManager? = null
+    private var tickerJob: Job? = null
+    private var loggedRawSampleCount = 0
+
+    // Rolling IBI window (ms) for RMSSD HRV computation
+    private val ibiWindowMs = ArrayDeque<Double>(32)
+    private var lastHrSum = 0L
+    private var lastHrCount = 0L
+
+    fun init(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+        val weekly = SomaBiometricsStore.load(ctx)
+        _state.value = _state.value.copy(
+            weekly = weekly,
+            currentHrvMs = _state.value.currentHrvMs ?: weekly.lastHrvMs
+        )
+    }
+
+    fun startPassiveMonitoring(context: Context) {
+        init(context)
+        registerSensors(context.applicationContext)
+    }
+
+    fun stopPassiveMonitoringIfIdle() {
+        if (_state.value.phase == WorkoutPhase.IDLE) {
+            unregisterSensors()
+        }
+    }
+
+    fun startWorkout(context: Context) {
+        val ctx = context.applicationContext
+        init(ctx)
+        registerSensors(ctx)
+
+        lastHrSum = 0L
+        lastHrCount = 0L
+        ibiWindowMs.clear()
+
+        val initialHr = _state.value.currentHr
+        _state.value = _state.value.copy(
+            phase = WorkoutPhase.ACTIVE,
+            elapsedSeconds = 0,
+            peakHr = initialHr,
+            avgHr = initialHr,
+            sessionZone2Sec = 0,
+            sessionZone3Sec = 0,
+            sessionVigorousSec = 0,
+            hrHistory = if (initialHr > 30) listOf(initialHr) else emptyList(),
+            recoveryStartHr = 0,
+            recoveryElapsedSec = 0,
+            hrr1Drop = null,
+            hrr2Drop = null
+        )
+
+        WorkoutForegroundService.start(ctx)
+        startTicker(ctx)
+    }
+
+    fun beginHrrRecovery(context: Context) {
+        val ctx = context.applicationContext
+        val current = _state.value
+        val startHr = if (current.currentHr > 40) current.currentHr else current.peakHr
+        vibrate(ctx, 100)
+        _state.value = current.copy(
+            phase = WorkoutPhase.HRR_RECOVERY,
+            recoveryStartHr = startHr,
+            recoveryElapsedSec = 0,
+            hrr1Drop = null,
+            hrr2Drop = null
+        )
+    }
+
+    fun finishWorkoutNow(context: Context) {
+        val ctx = context.applicationContext
+        val current = _state.value
+        tickerJob?.cancel()
+        tickerJob = null
+        WorkoutForegroundService.stop(ctx)
+
+        if (current.hrr1Drop != null || current.hrr2Drop != null) {
+            SomaBiometricsStore.saveLastHrr(ctx, current.hrr1Drop, current.hrr2Drop)
+        }
+        val refreshedWeekly = SomaBiometricsStore.load(ctx)
+        _state.value = current.copy(
+            phase = WorkoutPhase.SUMMARY,
+            weekly = refreshedWeekly
+        )
+        requestComplicationUpdate(ctx)
+        syncSummaryToPhone(ctx, _state.value)
+    }
+
+    fun dismissSummary() {
+        _state.value = _state.value.copy(phase = WorkoutPhase.IDLE)
+    }
+
+    fun refreshWeeklyFromStore(context: Context) {
+        val ctx = context.applicationContext
+        val weekly = SomaBiometricsStore.load(ctx)
+        _state.value = _state.value.copy(weekly = weekly)
+        requestComplicationUpdate(ctx)
+    }
+
+    fun computeZone(hr: Int, maxHr: Int): Int {
+        if (hr < 40 || maxHr <= 0) return 0
+        val pct = hr.toFloat() / maxHr.toFloat()
+        return when {
+            pct < 0.60f -> 1
+            pct < 0.70f -> 2
+            pct < 0.80f -> 3
+            pct < 0.90f -> 4
+            else -> 5
+        }
+    }
+
+    private fun registerSensors(ctx: Context) {
+        val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        sensorManager = sm
+        var registeredAny = false
+
+        val hrSensor = sm.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        if (hrSensor != null) {
+            val ok = sm.registerListener(this, hrSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            Log.i(TAG, "Registered TYPE_HEART_RATE (${hrSensor.name}): $ok")
+            registeredAny = registeredAny || ok
+        }
+
+        // Samsung Galaxy Watch 8 exposes com.samsung.sensor.hr_raw (69682) under READ_HEART_RATE
+        val rawSensor = sm.getDefaultSensor(SAMSUNG_HR_RAW_TYPE)
+        if (rawSensor != null) {
+            val ok = sm.registerListener(this, rawSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            Log.i(TAG, "Registered Samsung HR Raw (69682): $ok")
+            registeredAny = registeredAny || ok
+        }
+
+        _state.value = _state.value.copy(isSensorActive = registeredAny)
+    }
+
+    private fun unregisterSensors() {
+        sensorManager?.unregisterListener(this)
+        _state.value = _state.value.copy(isSensorActive = false)
+    }
+
+    private fun startTicker(ctx: Context) {
+        tickerJob?.cancel()
+        tickerJob = scope.launch {
+            while (isActive) {
+                delay(1000L)
+                val s = _state.value
+                when (s.phase) {
+                    WorkoutPhase.ACTIVE -> {
+                        val hr = s.currentHr
+                        val zone = computeZone(hr, s.weekly.maxHr)
+                        if (zone in 2..5) {
+                            SomaBiometricsStore.addZoneSecond(ctx, zone)
+                        }
+                        if (hr > 35) {
+                            lastHrSum += hr
+                            lastHrCount++
+                        }
+                        val newElapsed = s.elapsedSeconds + 1
+                        val newHistory = if (newElapsed % 2 == 0 && hr > 35) {
+                            (s.hrHistory + hr).takeLast(90)
+                        } else {
+                            s.hrHistory
+                        }
+                        val updatedWeekly = if (newElapsed % 5 == 0) {
+                            SomaBiometricsStore.load(ctx)
+                        } else {
+                            s.weekly.copy(
+                                zone2Seconds = s.weekly.zone2Seconds + if (zone == 2) 1 else 0,
+                                zone3Seconds = s.weekly.zone3Seconds + if (zone == 3) 1 else 0,
+                                vigorousSeconds = s.weekly.vigorousSeconds + if (zone == 4 || zone == 5) 1 else 0
+                            )
+                        }
+
+                        _state.value = s.copy(
+                            elapsedSeconds = newElapsed,
+                            currentZone = zone,
+                            peakHr = maxOf(s.peakHr, hr),
+                            avgHr = if (lastHrCount > 0) (lastHrSum / lastHrCount).toInt() else hr,
+                            sessionZone2Sec = s.sessionZone2Sec + if (zone == 2) 1 else 0,
+                            sessionZone3Sec = s.sessionZone3Sec + if (zone == 3) 1 else 0,
+                            sessionVigorousSec = s.sessionVigorousSec + if (zone == 4 || zone == 5) 1 else 0,
+                            hrHistory = newHistory,
+                            weekly = updatedWeekly
+                        )
+
+                        if (newElapsed % 15 == 0) {
+                            WorkoutForegroundService.updateNotification(ctx, hr, zone, newElapsed)
+                        }
+                    }
+
+                    WorkoutPhase.HRR_RECOVERY -> {
+                        val nextSec = s.recoveryElapsedSec + 1
+                        val hr = s.currentHr
+                        var hrr1 = s.hrr1Drop
+                        var hrr2 = s.hrr2Drop
+
+                        if (nextSec == 60 && hr > 35 && s.recoveryStartHr > 35) {
+                            hrr1 = (s.recoveryStartHr - hr).coerceAtLeast(0)
+                            vibrate(ctx, 120)
+                            SomaBiometricsStore.saveLastHrr(ctx, hrr1, null)
+                        }
+                        if (nextSec >= 120 && hr > 35 && s.recoveryStartHr > 35) {
+                            hrr2 = (s.recoveryStartHr - hr).coerceAtLeast(0)
+                            vibrate(ctx, 180)
+                            SomaBiometricsStore.saveLastHrr(ctx, hrr1, hrr2)
+                            _state.value = s.copy(
+                                recoveryElapsedSec = nextSec,
+                                hrr1Drop = hrr1,
+                                hrr2Drop = hrr2
+                            )
+                            finishWorkoutNow(ctx)
+                            return@launch
+                        }
+
+                        val newHistory = if (nextSec % 2 == 0 && hr > 35) {
+                            (s.hrHistory + hr).takeLast(90)
+                        } else {
+                            s.hrHistory
+                        }
+                        _state.value = s.copy(
+                            recoveryElapsedSec = nextSec,
+                            hrr1Drop = hrr1,
+                            hrr2Drop = hrr2,
+                            hrHistory = newHistory
+                        )
+                    }
+
+                    else -> break
+                }
+            }
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        val values = event.values
+        if (values.isEmpty()) return
+
+        when (event.sensor.type) {
+            Sensor.TYPE_HEART_RATE -> {
+                val hr = values[0].roundToInt()
+                if (hr in 35..230) {
+                    val s = _state.value
+                    val zone = computeZone(hr, s.weekly.maxHr)
+                    _state.value = s.copy(
+                        currentHr = hr,
+                        currentZone = zone,
+                        isSensorActive = true
+                    )
+                }
+            }
+
+            SAMSUNG_HR_RAW_TYPE -> {
+                if (loggedRawSampleCount < 6) {
+                    loggedRawSampleCount++
+                    Log.i(TAG, "HR_RAW sample #$loggedRawSampleCount: ${values.joinToString(", ")}")
+                }
+                // Extract valid IBI (Inter-Beat Interval in ms: 300..1600 ms) from Samsung HR Raw packet.
+                // Common Galaxy Watch layout: values[0]=HR, values[1]=IBI(ms) or values[2]=IBI(ms).
+                val candidateIbi = values.drop(1).firstOrNull { it in 300f..1600f }?.toDouble()
+                if (candidateIbi != null) {
+                    pushIbiSample(candidateIbi)
+                }
+                // Also update BPM from values[0] if TYPE_HEART_RATE hasn't delivered yet
+                val rawHr = values[0].roundToInt()
+                if (rawHr in 35..230 && _state.value.currentHr == 0) {
+                    val s = _state.value
+                    _state.value = s.copy(
+                        currentHr = rawHr,
+                        currentZone = computeZone(rawHr, s.weekly.maxHr),
+                        isSensorActive = true
+                    )
+                }
+            }
+        }
+    }
+
+    private fun pushIbiSample(ibiMs: Double) {
+        if (ibiWindowMs.isNotEmpty()) {
+            val prev = ibiWindowMs.last()
+            // Reject motion artifacts (>35% jump between adjacent beats)
+            if (kotlin.math.abs(ibiMs - prev) > prev * 0.35) return
+        }
+        if (ibiWindowMs.size >= 30) ibiWindowMs.removeFirst()
+        ibiWindowMs.addLast(ibiMs)
+
+        if (ibiWindowMs.size >= 6) {
+            val list = ibiWindowMs.toList()
+            var sumSqDiff = 0.0
+            for (i in 1 until list.size) {
+                val diff = list[i] - list[i - 1]
+                sumSqDiff += diff * diff
+            }
+            val rmssd = sqrt(sumSqDiff / (list.size - 1)).roundToInt().coerceIn(5, 220)
+            _state.value = _state.value.copy(
+                currentHrvMs = rmssd,
+                hrvSource = "IBI RMSSD"
+            )
+            appContext?.let { SomaBiometricsStore.saveLastHrv(it, rmssd) }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun requestComplicationUpdate(ctx: Context) {
+        runCatching {
+            val requester = ComplicationDataSourceUpdateRequester.create(
+                ctx,
+                ComponentName(ctx, CardioZoneComplicationService::class.java)
+            )
+            requester.requestUpdateAll()
+        }
+    }
+
+    private fun syncSummaryToPhone(ctx: Context, s: BiometricsUiState) {
+        scope.launch {
+            runCatching {
+                val json = JSONObject().apply {
+                    put("timestamp", System.currentTimeMillis())
+                    put("durationSec", s.elapsedSeconds)
+                    put("avgHr", s.avgHr)
+                    put("peakHr", s.peakHr)
+                    put("hrvMs", s.currentHrvMs ?: -1)
+                    put("hrr1", s.hrr1Drop ?: -1)
+                    put("hrr2", s.hrr2Drop ?: -1)
+                    put("sessionZ2Sec", s.sessionZone2Sec)
+                    put("sessionZ3Sec", s.sessionZone3Sec)
+                    put("sessionVigSec", s.sessionVigorousSec)
+                    put("weeklyZ2Min", s.weekly.zone2Minutes)
+                    put("weeklyZ2Goal", s.weekly.zone2GoalMin)
+                    put("weeklyVigMin", s.weekly.vigorousMinutes)
+                    put("weeklyVigGoal", s.weekly.vigorousGoalMin)
+                }
+                val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(ctx)
+                        .sendMessage(
+                            node.id,
+                            "/soma/workout_summary",
+                            json.toString().toByteArray(Charsets.UTF_8)
+                        ).await()
+                }
+                Log.i(TAG, "Synced workout summary to phone: $json")
+            }.onFailure { Log.w(TAG, "Failed syncing workout summary", it) }
+        }
+    }
+
+    private fun vibrate(ctx: Context, ms: Long) {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+}

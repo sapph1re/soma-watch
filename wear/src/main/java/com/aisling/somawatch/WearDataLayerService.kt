@@ -34,13 +34,28 @@ class WearDataLayerService : WearableListenerService() {
                 SomaWearState.recordPing(payload.ifEmpty { "Телефон" })
                 scope.launch {
                     runCatching {
-                        val reply = "Soma Watch v${BuildConfig.VERSION_NAME} на связи!"
+                        val reply = "Soma Watch v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) на связи!"
                         Wearable.getMessageClient(this@WearDataLayerService)
                             .sendMessage(
                                 messageEvent.sourceNodeId,
                                 "/soma/pong",
                                 reply.toByteArray(Charsets.UTF_8)
                             ).await()
+                    }
+                }
+            }
+            "/soma/ota_available" -> {
+                if (payload == "UP_TO_DATE" || payload.isBlank()) {
+                    SomaWearState.setAvailableUpdate(null)
+                } else {
+                    // Format: "<remoteVersionCode>|<label>"
+                    val parts = payload.split("|", limit = 2)
+                    val remoteCode = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                    val label = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "OTA #$remoteCode"
+                    if (remoteCode > BuildConfig.VERSION_CODE) {
+                        SomaWearState.setAvailableUpdate(AvailableOta(remoteCode, label))
+                    } else {
+                        SomaWearState.setAvailableUpdate(null)
                     }
                 }
             }
@@ -52,7 +67,6 @@ class WearDataLayerService : WearableListenerService() {
                 }
             }
             "/soma/ota_meta" -> {
-                // Format: "<totalBytes>|<versionLabel>"
                 val parts = payload.split("|", limit = 2)
                 val bytes = parts.getOrNull(0)?.toLongOrNull() ?: 0L
                 val version = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
@@ -62,6 +76,17 @@ class WearDataLayerService : WearableListenerService() {
                     totalBytes = bytes,
                     versionLabel = version
                 )
+            }
+            "/soma/update_goals" -> {
+                // Format: "<maxHr>|<z2GoalMin>|<vigGoalMin>"
+                val parts = payload.split("|")
+                val maxHr = parts.getOrNull(0)?.toIntOrNull() ?: 185
+                val z2 = parts.getOrNull(1)?.toIntOrNull() ?: 150
+                val vig = parts.getOrNull(2)?.toIntOrNull() ?: 75
+                SomaBiometricsStore.updateGoals(this, maxHr, z2, vig)
+                SomaBiometricsEngine.refreshWeeklyFromStore(this)
+                vibrate(80)
+                SomaWearState.updateStatus("Цели: Z2 $z2м, HIIT $vigм")
             }
             "/soma/jules_result" -> {
                 vibrate(140)

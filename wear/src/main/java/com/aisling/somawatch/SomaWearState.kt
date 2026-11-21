@@ -6,10 +6,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class AvailableOta(
+    val remoteVersionCode: Int,
+    val label: String
+)
+
 data class OtaUiState(
     val isActive: Boolean = false,
     val bannerText: String? = null,
-    val progress: Float? = null, // null = indeterminate when isActive=true; 0f..1f = determinate %
+    val progress: Float? = null,
     val receivedBytes: Long = 0L,
     val totalBytes: Long = 0L,
     val versionLabel: String? = null
@@ -24,6 +29,9 @@ object SomaWearState {
 
     private val _otaState = MutableStateFlow(OtaUiState())
     val otaState: StateFlow<OtaUiState> = _otaState
+
+    private val _availableUpdate = MutableStateFlow<AvailableOta?>(null)
+    val availableUpdate: StateFlow<AvailableOta?> = _availableUpdate
 
     private val _pendingVoicePrompt = MutableStateFlow<String?>(null)
     val pendingVoicePrompt: StateFlow<String?> = _pendingVoicePrompt
@@ -42,6 +50,10 @@ object SomaWearState {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         _lastSyncInfo.value = "$time • $result"
         _statusMessage.value = result
+    }
+
+    fun setAvailableUpdate(update: AvailableOta?) {
+        _availableUpdate.value = update
     }
 
     fun startOtaIndeterminate(message: String, totalBytes: Long = 0L, versionLabel: String? = null) {

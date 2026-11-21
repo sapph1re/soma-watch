@@ -26,16 +26,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material3.Button
@@ -63,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,6 +80,7 @@ private object CompanionColors {
     val Cyan = Color(0xFF38BDF8)
     val Indigo = Color(0xFF6366F1)
     val Emerald = Color(0xFF10B981)
+    val Coral = Color(0xFFF43F5E)
     val Purple = Color(0xFF8B5CF6)
     val SlateButton = Color(0xFF1E293B)
     val TextPrimary = Color(0xFFF8FAFC)
@@ -86,6 +90,9 @@ private object CompanionColors {
 class MobileMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        MobileBiometricsStore.loadLastSummary(this)?.let {
+            SomaMobileState.setLastBioSummary(it)
+        }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
@@ -110,7 +117,13 @@ fun SomaCompanionScreen() {
     val otaStatus by SomaMobileState.otaStatus.collectAsState()
     val otaProgress by SomaMobileState.otaProgress.collectAsState()
     val latestRelease by SomaMobileState.latestRelease.collectAsState()
+    val lastBio by SomaMobileState.lastBioSummary.collectAsState()
     val isBusy by SomaMobileState.isBusy.collectAsState()
+
+    val savedGoals = remember { MobileBiometricsStore.loadGoals(context) }
+    var maxHrInput by remember { mutableStateOf(savedGoals.first.toString()) }
+    var z2GoalInput by remember { mutableStateOf(savedGoals.second.toString()) }
+    var vigGoalInput by remember { mutableStateOf(savedGoals.third.toString()) }
 
     var promptDraft by remember { mutableStateOf("") }
     var tokenInput by remember { mutableStateOf(GitHubJulesClient.getSavedToken(context)) }
@@ -146,37 +159,161 @@ fun SomaCompanionScreen() {
         Spacer(modifier = Modifier.height(8.dp))
 
         // Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(CompanionColors.Cyan)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "SOMA WATCH",
+                    color = CompanionColors.TextPrimary,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.6.sp
+                )
+            }
+            Text(
+                text = "v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) • ${BuildConfig.GITHUB_REPO}",
+                color = CompanionColors.TextSecondary,
+                fontSize = 12.sp
+            )
+        }
+
+        // 1. Biometrics & Weekly Cardio Budget Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
         ) {
-            Column {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(CompanionColors.Cyan)
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = CompanionColors.Emerald,
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "SOMA WATCH",
+                        text = "Биометрия и Кардио-бюджет",
                         color = CompanionColors.TextPrimary,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.6.sp
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-                Text(
-                    text = "v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) • ${BuildConfig.GITHUB_REPO}",
-                    color = CompanionColors.TextSecondary,
-                    fontSize = 12.sp
-                )
+
+                if (lastBio != null) {
+                    val b = lastBio!!
+                    val z2Frac = (b.weeklyZ2Min.toFloat() / b.weeklyZ2Goal.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    val vigFrac = (b.weeklyVigMin.toFloat() / b.weeklyVigGoal.coerceAtLeast(1)).coerceIn(0f, 1f)
+
+                    Text(
+                        text = "Zone 2: ${b.weeklyZ2Min} / ${b.weeklyZ2Goal} мин",
+                        color = CompanionColors.Emerald,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    LinearProgressIndicator(
+                        progress = { z2Frac },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = CompanionColors.Emerald,
+                        trackColor = CompanionColors.SlateButton
+                    )
+
+                    Text(
+                        text = "Zone 4–5 (HIIT): ${b.weeklyVigMin} / ${b.weeklyVigGoal} мин",
+                        color = CompanionColors.Coral,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    LinearProgressIndicator(
+                        progress = { vigFrac },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = CompanionColors.Coral,
+                        trackColor = CompanionColors.SlateButton
+                    )
+
+                    val hrrText = buildString {
+                        if (b.hrr1 >= 0) append("HRR-1: -${b.hrr1}  ")
+                        if (b.hrr2 >= 0) append("HRR-2: -${b.hrr2}  ")
+                        if (b.hrvMs > 0) append("HRV: ${b.hrvMs}ms")
+                    }
+                    Text(
+                        text = "Последняя сессия: ${b.durationSec / 60} мин • ср/пик ${b.avgHr}/${b.peakHr} BPM" +
+                            if (hrrText.isNotBlank()) "\n$hrrText" else "",
+                        color = CompanionColors.TextSecondary,
+                        fontSize = 12.sp
+                    )
+                } else {
+                    Text(
+                        text = "Запусти тренировку «Бег / Кардио» на часах — итоги, HRV, HRR и недельный прогресс синхронизируются сюда автоматически.",
+                        color = CompanionColors.TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = maxHrInput,
+                        onValueChange = { maxHrInput = it.filter { ch -> ch.isDigit() } },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Max HR", fontSize = 11.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = z2GoalInput,
+                        onValueChange = { z2GoalInput = it.filter { ch -> ch.isDigit() } },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Z2 мин", fontSize = 11.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = vigGoalInput,
+                        onValueChange = { vigGoalInput = it.filter { ch -> ch.isDigit() } },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("HIIT мин", fontSize = 11.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        val mHr = maxHrInput.toIntOrNull() ?: 185
+                        val z2 = z2GoalInput.toIntOrNull() ?: 150
+                        val vig = vigGoalInput.toIntOrNull() ?: 75
+                        MobileBiometricsStore.saveGoals(context, mHr, z2, vig)
+                        scope.launch { syncGoalsToWatch(context, mHr, z2, vig) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CompanionColors.SlateButton,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Синхронизировать цели с Galaxy Watch 8")
+                }
             }
         }
 
-        // 1. Voice & Agent Evolution Card
+        // 2. Voice & Agent Evolution Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -215,7 +352,7 @@ fun SomaCompanionScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     label = { Text("Идея новой фичи или метрики") },
-                    placeholder = { Text("Например: добавь живой график пульса") },
+                    placeholder = { Text("Например: добавь децибелометр > 85 дБ") },
                     maxLines = 4
                 )
 
@@ -267,7 +404,7 @@ fun SomaCompanionScreen() {
                         )
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Send,
+                            imageVector = Icons.AutoMirrored.Rounded.Send,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
@@ -278,7 +415,7 @@ fun SomaCompanionScreen() {
             }
         }
 
-        // 2. Cloud OTA Updater Card
+        // 3. Cloud OTA Updater Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -348,6 +485,7 @@ fun SomaCompanionScreen() {
                 }
 
                 latestRelease?.let { release ->
+                    val isPhoneNewer = release.remoteVersionCode > BuildConfig.VERSION_CODE
                     Text(
                         text = "Релиз: ${release.name} (${release.tagName})",
                         color = CompanionColors.Emerald,
@@ -380,11 +518,11 @@ fun SomaCompanionScreen() {
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Установить на Galaxy Watch 8 по BT")
+                            Text("Отправить APK на Galaxy Watch 8 по BT")
                         }
                     }
 
-                    if (release.mobileApkUrl != null) {
+                    if (release.mobileApkUrl != null && isPhoneNewer) {
                         Button(
                             onClick = {
                                 scope.launch {
@@ -401,12 +539,18 @@ fun SomaCompanionScreen() {
                         ) {
                             Text("Обновить Soma Watch на телефоне")
                         }
+                    } else if (!isPhoneNewer) {
+                        Text(
+                            text = "На телефоне установлена актуальная версия ✓",
+                            color = CompanionColors.TextSecondary,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
         }
 
-        // 3. Watch Connection Card
+        // 4. Watch Connection Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -470,7 +614,7 @@ fun SomaCompanionScreen() {
             }
         }
 
-        // 4. Collapsible API Keys Card
+        // 5. Collapsible API Keys Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -561,6 +705,25 @@ fun SomaCompanionScreen() {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+private suspend fun syncGoalsToWatch(context: Context, maxHr: Int, z2Goal: Int, vigGoal: Int) {
+    try {
+        val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+        if (nodes.isEmpty()) {
+            SomaMobileState.recordWatchMessage("Часы не найдены")
+            return
+        }
+        val payload = "$maxHr|$z2Goal|$vigGoal"
+        nodes.forEach { node ->
+            Wearable.getMessageClient(context)
+                .sendMessage(node.id, "/soma/update_goals", payload.toByteArray(Charsets.UTF_8))
+                .await()
+        }
+        SomaMobileState.recordWatchMessage("Цели отправлены: MaxHR $maxHr, Z2 $z2Goalм, HIIT $vigGoalм")
+    } catch (e: Exception) {
+        SomaMobileState.recordWatchMessage("Ошибка: ${e.localizedMessage}")
     }
 }
 

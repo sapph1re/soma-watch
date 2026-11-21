@@ -10,6 +10,7 @@ data class GitHubReleaseInfo(
     val tagName: String,
     val name: String,
     val publishedAt: String,
+    val remoteVersionCode: Int,
     val wearApkUrl: String?,
     val mobileApkUrl: String?
 )
@@ -33,8 +34,15 @@ object SomaMobileState {
     private val _latestRelease = MutableStateFlow<GitHubReleaseInfo?>(null)
     val latestRelease: StateFlow<GitHubReleaseInfo?> = _latestRelease
 
+    private val _lastBioSummary = MutableStateFlow<SyncedBiometricsSummary?>(null)
+    val lastBioSummary: StateFlow<SyncedBiometricsSummary?> = _lastBioSummary
+
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy
+
+    fun setLastBioSummary(summary: SyncedBiometricsSummary?) {
+        _lastBioSummary.value = summary
+    }
 
     fun setConnectedWatch(name: String) {
         _connectedWatchName.value = name

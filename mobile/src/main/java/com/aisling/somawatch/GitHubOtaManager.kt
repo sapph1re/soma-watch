@@ -17,6 +17,12 @@ import java.net.URL
 object GitHubOtaManager {
     private const val TAG = "SomaOtaManager"
 
+    fun parseRemoteVersionCode(tagName: String): Int {
+        val match = Regex("(\\d+)$").find(tagName.trim())
+        val runNumber = match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return 0
+        return 100 + runNumber
+    }
+
     suspend fun checkLatestRelease(repo: String = BuildConfig.GITHUB_REPO): GitHubReleaseInfo? =
         withContext(Dispatchers.IO) {
             try {
@@ -62,10 +68,12 @@ object GitHubOtaManager {
                     }
                 }
 
+                val remoteVersionCode = parseRemoteVersionCode(tagName)
                 val info = GitHubReleaseInfo(
                     tagName = tagName,
                     name = name,
                     publishedAt = publishedAt,
+                    remoteVersionCode = remoteVersionCode,
                     wearApkUrl = wearUrl,
                     mobileApkUrl = mobileUrl
                 )
