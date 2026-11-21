@@ -721,7 +721,7 @@ private suspend fun syncGoalsToWatch(context: Context, maxHr: Int, z2Goal: Int, 
                 .sendMessage(node.id, "/soma/update_goals", payload.toByteArray(Charsets.UTF_8))
                 .await()
         }
-        SomaMobileState.recordWatchMessage("Цели отправлены: MaxHR $maxHr, Z2 $z2Goalм, HIIT $vigGoalм")
+        SomaMobileState.recordWatchMessage("Цели отправлены: MaxHR $maxHr, Z2 ${z2Goal}м, HIIT ${vigGoal}м")
     } catch (e: Exception) {
         SomaMobileState.recordWatchMessage("Ошибка: ${e.localizedMessage}")
     }

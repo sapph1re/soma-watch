@@ -86,7 +86,7 @@ class WearDataLayerService : WearableListenerService() {
                 SomaBiometricsStore.updateGoals(this, maxHr, z2, vig)
                 SomaBiometricsEngine.refreshWeeklyFromStore(this)
                 vibrate(80)
-                SomaWearState.updateStatus("Цели: Z2 $z2м, HIIT $vigм")
+                SomaWearState.updateStatus("Цели: Z2 ${z2}м, HIIT ${vig}м")
             }
             "/soma/jules_result" -> {
                 vibrate(140)
