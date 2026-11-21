@@ -16,8 +16,15 @@ object SomaWearState {
     private val _otaProgress = MutableStateFlow<String?>(null)
     val otaProgress: StateFlow<String?> = _otaProgress
 
+    private val _isOtaBusy = MutableStateFlow(false)
+    val isOtaBusy: StateFlow<Boolean> = _isOtaBusy
+
     private val _pendingVoicePrompt = MutableStateFlow<String?>(null)
     val pendingVoicePrompt: StateFlow<String?> = _pendingVoicePrompt
+
+    fun setOtaBusy(busy: Boolean) {
+        _isOtaBusy.value = busy
+    }
 
     fun updateStatus(msg: String) {
         _statusMessage.value = msg

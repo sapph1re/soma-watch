@@ -54,6 +54,9 @@ import kotlinx.coroutines.tasks.await
 class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra("just_updated", false) == true) {
+            SomaWearState.updateOtaProgress("Обновлено до v${BuildConfig.VERSION_NAME} ✓")
+        }
         setContent {
             MaterialTheme {
                 SomaDashboardScreen()
@@ -71,6 +74,7 @@ fun SomaDashboardScreen() {
     val statusMessage by SomaWearState.statusMessage.collectAsState()
     val lastSyncInfo by SomaWearState.lastSyncInfo.collectAsState()
     val otaProgress by SomaWearState.otaProgress.collectAsState()
+    val isOtaBusy by SomaWearState.isOtaBusy.collectAsState()
     val pendingPrompt by SomaWearState.pendingVoicePrompt.collectAsState()
 
     val speechLauncher = rememberLauncherForActivityResult(
@@ -258,14 +262,16 @@ fun SomaDashboardScreen() {
 
                     Button(
                         onClick = {
+                            if (isOtaBusy) return@Button
                             triggerVibration(context, 70)
                             scope.launch { requestOtaCheckFromPhone(context) }
                         },
+                        enabled = !isOtaBusy,
                         colors = ButtonDefaults.primaryButtonColors(
                             backgroundColor = Color(0xFF0F766E)
                         )
                     ) {
-                        Text("OTA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(if (isOtaBusy) "..." else "OTA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

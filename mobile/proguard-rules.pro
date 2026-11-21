@@ -1,0 +1,3 @@
+-keep class com.aisling.somawatch.MobileDataLayerService { *; }
+-keep class com.aisling.somawatch.MobileMainActivity { *; }
+-dontwarn com.google.android.gms.**

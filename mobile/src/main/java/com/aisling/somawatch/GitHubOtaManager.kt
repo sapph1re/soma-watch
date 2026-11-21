@@ -2,6 +2,7 @@ package com.aisling.somawatch
 
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.google.android.gms.wearable.Wearable
@@ -80,9 +81,12 @@ object GitHubOtaManager {
         }
 
     suspend fun pushWearOtaToWatch(context: Context, wearApkUrl: String) = withContext(Dispatchers.IO) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SomaCompanion:OtaSend")
+        wakeLock.acquire(3 * 60 * 1000L)
         try {
             SomaMobileState.setBusy(true)
-            SomaMobileState.setOtaStatus("Скачиваем wear-debug.apk из GitHub...")
+            SomaMobileState.setOtaStatus("Скачиваем wear APK из GitHub...")
             notifyWatchStatus(context, "Телефон скачивает OTA...")
 
             val wearApkFile = File(context.cacheDir, "soma-wear-ota.apk")
@@ -96,7 +100,9 @@ object GitHubOtaManager {
             }
 
             val targetNode = nodes.first()
-            SomaMobileState.setOtaStatus("Отправка APK (${wearApkFile.length() / 1024} KB) на ${targetNode.displayName}...")
+            val sizeMb = String.format("%.1f", wearApkFile.length() / (1024.0 * 1024.0))
+            SomaMobileState.setOtaStatus("Отправка APK ($sizeMb МБ) на ${targetNode.displayName}...")
+            notifyWatchStatus(context, "Передача $sizeMb МБ по BT...")
 
             val channelClient = Wearable.getChannelClient(context)
             val channel = channelClient.openChannel(targetNode.id, "/soma/ota_apk").await()
@@ -113,12 +119,13 @@ object GitHubOtaManager {
                 }
             }
 
-            SomaMobileState.setOtaStatus("APK передан на ${targetNode.displayName}! Подтвердите установку на часах.")
+            SomaMobileState.setOtaStatus("APK ($sizeMb МБ) передан на ${targetNode.displayName}! Подтвердите установку на часах.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push Wear OTA", e)
             SomaMobileState.setOtaStatus("Ошибка отправки на часы: ${e.localizedMessage}")
         } finally {
             SomaMobileState.setBusy(false)
+            if (wakeLock.isHeld) wakeLock.release()
         }
     }
 

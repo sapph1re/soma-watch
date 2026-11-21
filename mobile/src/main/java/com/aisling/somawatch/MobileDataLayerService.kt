@@ -34,6 +34,10 @@ class MobileDataLayerService : WearableListenerService() {
                 }
             }
             "/soma/request_ota" -> {
+                if (SomaMobileState.isBusy.value) {
+                    Log.w(TAG, "Ignoring /soma/request_ota because OTA transfer is already running")
+                    return
+                }
                 SomaMobileState.recordWatchMessage("Часы запросили проверку облачного OTA")
                 scope.launch {
                     val release = GitHubOtaManager.checkLatestRelease()

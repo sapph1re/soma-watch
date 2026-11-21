@@ -33,12 +33,12 @@ jobs:
             keytool -list -v -keystore "$GITHUB_WORKSPACE/.soma-debug.keystore" -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1|SHA256"
           fi
 
-      - name: Build Soma Watch (:wear & :mobile) APKs
+      - name: Build Soma Watch (:wear & :mobile) Minified Release APKs
         run: |
           chmod +x ./gradlew
           VERSION_CODE=$((100 + ${{ github.run_number }}))
           VERSION_NAME="0.1.${{ github.run_number }}-cloud"
-          ./gradlew :wear:assembleDebug :mobile:assembleDebug \
+          ./gradlew :wear:assembleRelease :mobile:assembleRelease \
             -PversionCode=$VERSION_CODE \
             -PversionName=$VERSION_NAME \
             -PgithubRepo=${{ github.repository }}
@@ -46,8 +46,9 @@ jobs:
       - name: Prepare Release Assets
         run: |
           mkdir -p release_assets
-          cp wear/build/outputs/apk/debug/wear-debug.apk release_assets/wear-debug.apk
-          cp mobile/build/outputs/apk/debug/mobile-debug.apk release_assets/mobile-debug.apk
+          cp wear/build/outputs/apk/release/wear-release.apk release_assets/soma-wear-release.apk
+          cp mobile/build/outputs/apk/release/mobile-release.apk release_assets/soma-mobile-release.apk
+          ls -lh release_assets/
 
       - name: Publish GitHub Release for OTA Updater
         uses: softprops/action-gh-release@v2
@@ -55,9 +56,9 @@ jobs:
           tag_name: ota-build-${{ github.run_number }}
           name: "Soma Watch OTA #${{ github.run_number }} (v0.1.${{ github.run_number }}-cloud)"
           body: |
-            Автоматическая облачная сборка **Soma Watch** для Samsung Galaxy Watch 8 (`wear-debug.apk`) и Android-компаньона (`mobile-debug.apk`).
+            Автоматическая компактная R8-сборка **Soma Watch** для Samsung Galaxy Watch 8 (`soma-wear-release.apk`) и Android-компаньона (`soma-mobile-release.apk`).
             Коммит: ${{ github.sha }}
           files: |
-            release_assets/wear-debug.apk
-            release_assets/mobile-debug.apk
+            release_assets/soma-wear-release.apk
+            release_assets/soma-mobile-release.apk
           prerelease: false

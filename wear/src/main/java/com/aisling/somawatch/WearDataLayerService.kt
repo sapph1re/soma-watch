@@ -2,6 +2,7 @@ package com.aisling.somawatch
 
 import android.content.Context
 import android.os.Build
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -16,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 class WearDataLayerService : WearableListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -54,9 +56,20 @@ class WearDataLayerService : WearableListenerService() {
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         super.onChannelOpened(channel)
         if (channel.path == "/soma/ota_apk") {
+            if (!isReceivingOta.compareAndSet(false, true)) {
+                Log.w(TAG, "Ignoring duplicate OTA channel while transfer is already active")
+                return
+            }
+
             Log.i(TAG, "Receiving OTA APK over ChannelClient...")
-            vibrate(120)
-            SomaWearState.updateOtaProgress("Приём APK по Bluetooth...")
+            vibrate(100)
+            SomaWearState.setOtaBusy(true)
+            SomaWearState.updateOtaProgress("Приём OTA по Bluetooth...")
+
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SomaWatch:OtaReceive")
+            wakeLock.acquire(3 * 60 * 1000L)
+
             scope.launch {
                 try {
                     val otaFile = File(cacheDir, "soma-wear-ota.apk")
@@ -67,6 +80,7 @@ class WearDataLayerService : WearableListenerService() {
                         .await()
 
                     var totalBytes = 0L
+                    var lastReportedKb = 0L
                     inputStream.use { input ->
                         otaFile.outputStream().use { output ->
                             val buffer = ByteArray(16 * 1024)
@@ -74,7 +88,14 @@ class WearDataLayerService : WearableListenerService() {
                             while (input.read(buffer).also { read = it } != -1) {
                                 output.write(buffer, 0, read)
                                 totalBytes += read
-                                SomaWearState.updateOtaProgress("Загрузка OTA: ${totalBytes / 1024} KB")
+                                val kb = totalBytes / 1024
+                                if (kb - lastReportedKb >= 64) {
+                                    lastReportedKb = kb
+                                    val mb = totalBytes / (1024.0 * 1024.0)
+                                    SomaWearState.updateOtaProgress(
+                                        String.format("Загрузка OTA: %.1f МБ", mb)
+                                    )
+                                }
                             }
                             output.flush()
                         }
@@ -85,6 +106,10 @@ class WearDataLayerService : WearableListenerService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed receiving OTA APK over channel", e)
                     SomaWearState.updateOtaProgress("Ошибка приёма OTA: ${e.localizedMessage}")
+                } finally {
+                    isReceivingOta.set(false)
+                    SomaWearState.setOtaBusy(false)
+                    if (wakeLock.isHeld) wakeLock.release()
                 }
             }
         }
@@ -103,5 +128,6 @@ class WearDataLayerService : WearableListenerService() {
 
     companion object {
         private const val TAG = "SomaWearDataLayer"
+        private val isReceivingOta = AtomicBoolean(false)
     }
 }

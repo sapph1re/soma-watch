@@ -1,0 +1,5 @@
+-keep class com.aisling.somawatch.WearDataLayerService { *; }
+-keep class com.aisling.somawatch.OtaInstallReceiver { *; }
+-keep class com.aisling.somawatch.PackageReplacedReceiver { *; }
+-keep class com.aisling.somawatch.WearMainActivity { *; }
+-dontwarn com.google.android.gms.**
