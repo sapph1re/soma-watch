@@ -104,7 +104,7 @@ fun SomaDashboardScreen() {
             item {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 18.dp)
+                    modifier = Modifier.padding(top = 26.dp)
                 ) {
                     Text(
                         text = "SOMA WATCH",

@@ -22,6 +22,18 @@ android {
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
     }
 
+    signingConfigs {
+        getByName("debug") {
+            val ciKeystore = System.getenv("SOMA_KEYSTORE_PATH")
+            if (!ciKeystore.isNullOrBlank() && file(ciKeystore).exists()) {
+                storeFile = file(ciKeystore)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

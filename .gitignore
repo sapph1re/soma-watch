@@ -9,5 +9,6 @@
 .externalNativeBuild
 .cxx
 *.apk
+*.keystore
 watch_screen.png
 phone_screen.png
