@@ -68,7 +68,7 @@ object GitHubJulesClient {
             val payload = JSONObject().apply {
                 put("title", "[$source] $shortTitle")
                 put("body", issueBody)
-                put("labels", JSONArray().put("jules"))
+                put("labels", JSONArray().put("soma-agent"))
             }
 
             val url = URL("https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/issues")

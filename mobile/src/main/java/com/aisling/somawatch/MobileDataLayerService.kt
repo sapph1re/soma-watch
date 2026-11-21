@@ -44,9 +44,13 @@ class MobileDataLayerService : WearableListenerService() {
                 scope.launch {
                     val release = GitHubOtaManager.checkLatestRelease()
                     if (release?.wearApkUrl != null) {
-                        GitHubOtaManager.pushWearOtaToWatch(this@MobileDataLayerService, release.wearApkUrl)
+                        GitHubOtaManager.pushWearOtaToWatch(
+                            context = this@MobileDataLayerService,
+                            wearApkUrl = release.wearApkUrl,
+                            versionLabel = release.tagName
+                        )
                     } else {
-                        val msg = "Релиз с wear APK не найден в ${BuildConfig.GITHUB_REPO}"
+                        val msg = "DONE:Релиз не найден в ${BuildConfig.GITHUB_REPO}"
                         Wearable.getMessageClient(this@MobileDataLayerService)
                             .sendMessage(
                                 messageEvent.sourceNodeId,

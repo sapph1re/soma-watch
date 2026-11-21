@@ -21,11 +21,14 @@ object SomaMobileState {
     private val _lastWatchMessage = MutableStateFlow("Пока нет сообщений")
     val lastWatchMessage: StateFlow<String> = _lastWatchMessage
 
-    private val _julesStatus = MutableStateFlow("Готов отправлять идеи в GitHub Issues (label: jules)")
+    private val _julesStatus = MutableStateFlow("Готов отправлять задачи в GitHub Issues")
     val julesStatus: StateFlow<String> = _julesStatus
 
-    private val _otaStatus = MutableStateFlow("OTA готов (репозиторий: ${BuildConfig.GITHUB_REPO})")
+    private val _otaStatus = MutableStateFlow("OTA готов (${BuildConfig.GITHUB_REPO})")
     val otaStatus: StateFlow<String> = _otaStatus
+
+    private val _otaProgress = MutableStateFlow<Float?>(null)
+    val otaProgress: StateFlow<Float?> = _otaProgress
 
     private val _latestRelease = MutableStateFlow<GitHubReleaseInfo?>(null)
     val latestRelease: StateFlow<GitHubReleaseInfo?> = _latestRelease
@@ -49,6 +52,10 @@ object SomaMobileState {
 
     fun setOtaStatus(status: String) {
         _otaStatus.value = status
+    }
+
+    fun setOtaProgress(progress: Float?) {
+        _otaProgress.value = progress
     }
 
     fun setLatestRelease(info: GitHubReleaseInfo?) {

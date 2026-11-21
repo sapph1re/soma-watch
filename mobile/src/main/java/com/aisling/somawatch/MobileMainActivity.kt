@@ -9,8 +9,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,13 +21,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -38,7 +57,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +70,19 @@ import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+private object CompanionColors {
+    val Bg = Color(0xFF050810)
+    val CardBg = Color(0xFF0E1420)
+    val CardBorder = Color(0xFF1E293B)
+    val Cyan = Color(0xFF38BDF8)
+    val Indigo = Color(0xFF6366F1)
+    val Emerald = Color(0xFF10B981)
+    val Purple = Color(0xFF8B5CF6)
+    val SlateButton = Color(0xFF1E293B)
+    val TextPrimary = Color(0xFFF8FAFC)
+    val TextSecondary = Color(0xFF94A3B8)
+}
+
 class MobileMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,7 +90,7 @@ class MobileMainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF070B14)
+                    color = CompanionColors.Bg
                 ) {
                     SomaCompanionScreen()
                 }
@@ -72,8 +106,9 @@ fun SomaCompanionScreen() {
 
     val connectedWatch by SomaMobileState.connectedWatchName.collectAsState()
     val lastWatchMessage by SomaMobileState.lastWatchMessage.collectAsState()
-    val julesStatus by SomaMobileState.julesStatus.collectAsState()
+    val agentStatus by SomaMobileState.julesStatus.collectAsState()
     val otaStatus by SomaMobileState.otaStatus.collectAsState()
+    val otaProgress by SomaMobileState.otaProgress.collectAsState()
     val latestRelease by SomaMobileState.latestRelease.collectAsState()
     val isBusy by SomaMobileState.isBusy.collectAsState()
 
@@ -82,6 +117,7 @@ fun SomaCompanionScreen() {
     var tokenSavedNotice by remember { mutableStateOf(tokenInput.isNotEmpty()) }
     var geminiKeyInput by remember { mutableStateOf(GeminiVoiceClient.getSavedApiKey(context)) }
     var geminiSavedNotice by remember { mutableStateOf(geminiKeyInput.isNotEmpty()) }
+    var showKeysSection by remember { mutableStateOf(!(tokenSavedNotice && geminiSavedNotice)) }
 
     val speechLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -102,44 +138,74 @@ fun SomaCompanionScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF070B14))
+            .background(CompanionColors.Bg)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "SOMA WATCH",
-            color = Color(0xFF38BDF8),
-            fontSize = 26.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.5.sp
-        )
-        Text(
-            text = "v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) • ${BuildConfig.GITHUB_REPO}",
-            color = Color(0xFF94A3B8),
-            fontSize = 13.sp
-        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // 1. Voice-to-Jules Card
+        // Header
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(CompanionColors.Cyan)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "SOMA WATCH",
+                        color = CompanionColors.TextPrimary,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.6.sp
+                    )
+                }
+                Text(
+                    text = "v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) • ${BuildConfig.GITHUB_REPO}",
+                    color = CompanionColors.TextSecondary,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        // 1. Voice & Agent Evolution Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = CompanionColors.Indigo,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Эволюция Soma Watch",
+                        color = CompanionColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Text(
-                    text = "🎙️ Эволюция Soma Watch (→ Jules)",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = julesStatus,
-                    color = Color(0xFF38BDF8),
+                    text = agentStatus,
+                    color = CompanionColors.Cyan,
                     fontSize = 13.sp
                 )
 
@@ -147,8 +213,9 @@ fun SomaCompanionScreen() {
                     value = promptDraft,
                     onValueChange = { promptDraft = it },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
                     label = { Text("Идея новой фичи или метрики") },
-                    placeholder = { Text("Например: добавь децибелометр с алертом >85 дБ") },
+                    placeholder = { Text("Например: добавь живой график пульса") },
                     maxLines = 4
                 )
 
@@ -164,12 +231,19 @@ fun SomaCompanionScreen() {
                             }
                             runCatching { speechLauncher.launch(intent) }
                         },
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF334155),
+                            containerColor = CompanionColors.SlateButton,
                             contentColor = Color.White
                         )
                     ) {
-                        Text("🎙️ Голос")
+                        Icon(
+                            imageVector = Icons.Rounded.Mic,
+                            contentDescription = "Голос",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Голос")
                     }
 
                     Button(
@@ -186,53 +260,20 @@ fun SomaCompanionScreen() {
                         },
                         enabled = !isBusy && promptDraft.isNotBlank(),
                         modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF6366F1),
+                            containerColor = CompanionColors.Indigo,
                             contentColor = Color.White
                         )
                     ) {
-                        Text("Отправить в Jules 🚀")
+                        Icon(
+                            imageVector = Icons.Rounded.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("В GitHub Issue")
                     }
-                }
-
-                OutlinedTextField(
-                    value = tokenInput,
-                    onValueChange = {
-                        tokenInput = it
-                        tokenSavedNotice = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (tokenSavedNotice) "GitHub Token (сохранён ✓)" else "GitHub Token (для создания Issues)") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = geminiKeyInput,
-                    onValueChange = {
-                        geminiKeyInput = it
-                        geminiSavedNotice = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (geminiSavedNotice) "Gemini API Key (сохранён ✓)" else "Gemini API Key (для расшифровки голоса)") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
-                )
-
-                Button(
-                    onClick = {
-                        GitHubJulesClient.saveToken(context, tokenInput)
-                        GeminiVoiceClient.saveApiKey(context, geminiKeyInput)
-                        tokenSavedNotice = tokenInput.isNotBlank()
-                        geminiSavedNotice = geminiKeyInput.isNotBlank()
-                        SomaMobileState.setJulesStatus("Ключи сохранены локально!")
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1E293B),
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text("Сохранить ключи")
                 }
             }
         }
@@ -240,31 +281,64 @@ fun SomaCompanionScreen() {
         // 2. Cloud OTA Updater Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "☁️ Облачный OTA-Апдейтер (GitHub Releases)",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.CloudDownload,
+                        contentDescription = null,
+                        tint = CompanionColors.Cyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Облачный OTA-Апдейтер",
+                        color = CompanionColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Text(
                     text = otaStatus,
-                    color = Color(0xFF38BDF8),
+                    color = CompanionColors.Cyan,
                     fontSize = 13.sp
                 )
 
+                if (isBusy) {
+                    if (otaProgress != null) {
+                        LinearProgressIndicator(
+                            progress = { otaProgress ?: 0f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50)),
+                            color = CompanionColors.Cyan,
+                            trackColor = CompanionColors.SlateButton
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50)),
+                            color = CompanionColors.Cyan,
+                            trackColor = CompanionColors.SlateButton
+                        )
+                    }
+                }
+
                 Button(
-                    onClick = {
-                        scope.launch { GitHubOtaManager.checkLatestRelease() }
-                    },
+                    onClick = { scope.launch { GitHubOtaManager.checkLatestRelease() } },
                     enabled = !isBusy,
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF0284C7),
                         contentColor = Color.White
@@ -276,8 +350,8 @@ fun SomaCompanionScreen() {
                 latestRelease?.let { release ->
                     Text(
                         text = "Релиз: ${release.name} (${release.tagName})",
-                        color = Color(0xFF10B981),
-                        fontSize = 14.sp,
+                        color = CompanionColors.Emerald,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
 
@@ -285,17 +359,28 @@ fun SomaCompanionScreen() {
                         Button(
                             onClick = {
                                 scope.launch {
-                                    GitHubOtaManager.pushWearOtaToWatch(context, release.wearApkUrl)
+                                    GitHubOtaManager.pushWearOtaToWatch(
+                                        context = context,
+                                        wearApkUrl = release.wearApkUrl,
+                                        versionLabel = release.tagName
+                                    )
                                 }
                             },
                             enabled = !isBusy,
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF10B981),
+                                containerColor = CompanionColors.Emerald,
                                 contentColor = Color.White
                             )
                         ) {
-                            Text("Установить свежий APK на Galaxy Watch 8 по BT")
+                            Icon(
+                                imageVector = Icons.Rounded.SystemUpdate,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Установить на Galaxy Watch 8 по BT")
                         }
                     }
 
@@ -308,8 +393,9 @@ fun SomaCompanionScreen() {
                             },
                             enabled = !isBusy,
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF8B5CF6),
+                                containerColor = CompanionColors.Purple,
                                 contentColor = Color.White
                             )
                         ) {
@@ -323,35 +409,47 @@ fun SomaCompanionScreen() {
         // 3. Watch Connection Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Watch,
+                        contentDescription = null,
+                        tint = CompanionColors.Emerald,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Связь с Galaxy Watch 8",
+                        color = CompanionColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Text(
-                    text = "⌚ Связь с Galaxy Watch 8",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Узел: $connectedWatch",
-                    color = Color(0xFF38BDF8),
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = "Последнее: $lastWatchMessage",
-                    color = Color(0xFFCBD5E1),
+                    text = connectedWatch,
+                    color = CompanionColors.Cyan,
                     fontSize = 13.sp
+                )
+                Text(
+                    text = lastWatchMessage,
+                    color = CompanionColors.TextSecondary,
+                    fontSize = 12.sp
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = { scope.launch { refreshConnectedWatch(context) } },
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF334155),
+                            containerColor = CompanionColors.SlateButton,
                             contentColor = Color.White
                         )
                     ) {
@@ -360,16 +458,108 @@ fun SomaCompanionScreen() {
 
                     Button(
                         onClick = { scope.launch { pingWatch(context) } },
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFF0F766E),
                             contentColor = Color.White
                         )
                     ) {
-                        Text("Пинг + Вибро ⌚")
+                        Text("Пинг + Вибро")
                     }
                 }
             }
         }
+
+        // 4. Collapsible API Keys Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showKeysSection = !showKeysSection }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (tokenSavedNotice && geminiSavedNotice) Icons.Rounded.CheckCircle else Icons.Rounded.Key,
+                            contentDescription = null,
+                            tint = if (tokenSavedNotice && geminiSavedNotice) CompanionColors.Emerald else CompanionColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (tokenSavedNotice && geminiSavedNotice) "Ключи API настроены" else "Настройка ключей API",
+                            color = CompanionColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showKeysSection) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        tint = CompanionColors.TextSecondary
+                    )
+                }
+
+                if (showKeysSection) {
+                    OutlinedTextField(
+                        value = tokenInput,
+                        onValueChange = {
+                            tokenInput = it
+                            tokenSavedNotice = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        label = { Text(if (tokenSavedNotice) "GitHub Token ✓" else "GitHub Token") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = geminiKeyInput,
+                        onValueChange = {
+                            geminiKeyInput = it
+                            geminiSavedNotice = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        label = { Text(if (geminiSavedNotice) "Gemini API Key ✓" else "Gemini API Key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+
+                    Button(
+                        onClick = {
+                            GitHubJulesClient.saveToken(context, tokenInput)
+                            GeminiVoiceClient.saveApiKey(context, geminiKeyInput)
+                            tokenSavedNotice = tokenInput.isNotBlank()
+                            geminiSavedNotice = geminiKeyInput.isNotBlank()
+                            if (tokenSavedNotice && geminiSavedNotice) {
+                                showKeysSection = false
+                            }
+                            SomaMobileState.setJulesStatus("Ключи сохранены локально!")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CompanionColors.SlateButton,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Сохранить ключи")
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
     }
 }

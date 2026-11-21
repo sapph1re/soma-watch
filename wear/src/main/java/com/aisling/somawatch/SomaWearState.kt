@@ -6,25 +6,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class OtaUiState(
+    val isActive: Boolean = false,
+    val bannerText: String? = null,
+    val progress: Float? = null, // null = indeterminate when isActive=true; 0f..1f = determinate %
+    val receivedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val versionLabel: String? = null
+)
+
 object SomaWearState {
-    private val _statusMessage = MutableStateFlow("Готов к работе")
+    private val _statusMessage = MutableStateFlow("На связи")
     val statusMessage: StateFlow<String> = _statusMessage
 
-    private val _lastSyncInfo = MutableStateFlow("Нажми 🎙️ чтобы надиктовать фичу")
+    private val _lastSyncInfo = MutableStateFlow("Скажи идею — соберём OTA")
     val lastSyncInfo: StateFlow<String> = _lastSyncInfo
 
-    private val _otaProgress = MutableStateFlow<String?>(null)
-    val otaProgress: StateFlow<String?> = _otaProgress
-
-    private val _isOtaBusy = MutableStateFlow(false)
-    val isOtaBusy: StateFlow<Boolean> = _isOtaBusy
+    private val _otaState = MutableStateFlow(OtaUiState())
+    val otaState: StateFlow<OtaUiState> = _otaState
 
     private val _pendingVoicePrompt = MutableStateFlow<String?>(null)
     val pendingVoicePrompt: StateFlow<String?> = _pendingVoicePrompt
-
-    fun setOtaBusy(busy: Boolean) {
-        _isOtaBusy.value = busy
-    }
 
     fun updateStatus(msg: String) {
         _statusMessage.value = msg
@@ -32,18 +34,57 @@ object SomaWearState {
 
     fun recordPing(from: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        _lastSyncInfo.value = "$from ($time)"
-        _statusMessage.value = "Пинг получен ($time)"
+        _lastSyncInfo.value = "$from • $time"
+        _statusMessage.value = "Пинг получен"
     }
 
-    fun recordJulesResult(result: String) {
+    fun recordAgentResult(result: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        _lastSyncInfo.value = "Jules [$time]: $result"
+        _lastSyncInfo.value = "$time • $result"
         _statusMessage.value = result
     }
 
-    fun updateOtaProgress(msg: String?) {
-        _otaProgress.value = msg
+    fun startOtaIndeterminate(message: String, totalBytes: Long = 0L, versionLabel: String? = null) {
+        _otaState.value = OtaUiState(
+            isActive = true,
+            bannerText = message,
+            progress = null,
+            receivedBytes = 0L,
+            totalBytes = totalBytes,
+            versionLabel = versionLabel
+        )
+    }
+
+    fun updateOtaTransfer(receivedBytes: Long, totalBytes: Long) {
+        val current = _otaState.value
+        val effectiveTotal = if (totalBytes > 0L) totalBytes else current.totalBytes
+        val pct = if (effectiveTotal > 0L) {
+            (receivedBytes.toFloat() / effectiveTotal.toFloat()).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+        val mbDone = receivedBytes / (1024.0 * 1024.0)
+        val label = if (effectiveTotal > 0L) {
+            val mbTotal = effectiveTotal / (1024.0 * 1024.0)
+            String.format("%.1f / %.1f МБ", mbDone, mbTotal)
+        } else {
+            String.format("%.1f МБ", mbDone)
+        }
+        _otaState.value = current.copy(
+            isActive = true,
+            bannerText = label,
+            progress = pct,
+            receivedBytes = receivedBytes,
+            totalBytes = effectiveTotal
+        )
+    }
+
+    fun finishOtaMessage(message: String?) {
+        _otaState.value = OtaUiState(
+            isActive = false,
+            bannerText = message,
+            progress = null
+        )
     }
 
     fun setPendingVoicePrompt(text: String?) {

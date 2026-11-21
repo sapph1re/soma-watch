@@ -21,6 +21,7 @@ object GitHubOtaManager {
         withContext(Dispatchers.IO) {
             try {
                 SomaMobileState.setBusy(true)
+                SomaMobileState.setOtaProgress(null)
                 SomaMobileState.setOtaStatus("Проверяем GitHub Releases ($repo)...")
                 val url = URL("https://api.github.com/repos/$repo/releases/latest")
                 val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -80,14 +81,19 @@ object GitHubOtaManager {
             }
         }
 
-    suspend fun pushWearOtaToWatch(context: Context, wearApkUrl: String) = withContext(Dispatchers.IO) {
+    suspend fun pushWearOtaToWatch(
+        context: Context,
+        wearApkUrl: String,
+        versionLabel: String = ""
+    ) = withContext(Dispatchers.IO) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SomaCompanion:OtaSend")
         wakeLock.acquire(3 * 60 * 1000L)
         try {
             SomaMobileState.setBusy(true)
+            SomaMobileState.setOtaProgress(0f)
             SomaMobileState.setOtaStatus("Скачиваем wear APK из GitHub...")
-            notifyWatchStatus(context, "Телефон скачивает OTA...")
+            notifyWatchStatus(context, "Скачивание с GitHub...")
 
             val wearApkFile = File(context.cacheDir, "soma-wear-ota.apk")
             if (wearApkFile.exists()) wearApkFile.delete()
@@ -100,31 +106,46 @@ object GitHubOtaManager {
             }
 
             val targetNode = nodes.first()
-            val sizeMb = String.format("%.1f", wearApkFile.length() / (1024.0 * 1024.0))
-            SomaMobileState.setOtaStatus("Отправка APK ($sizeMb МБ) на ${targetNode.displayName}...")
-            notifyWatchStatus(context, "Передача $sizeMb МБ по BT...")
+            val totalBytes = wearApkFile.length()
+            val sizeMb = String.format("%.1f", totalBytes / (1024.0 * 1024.0))
+
+            // Send exact file size & version label first so Watch 8 renders a real 0-100% progress ring!
+            val metaPayload = "$totalBytes|$versionLabel"
+            Wearable.getMessageClient(context)
+                .sendMessage(targetNode.id, "/soma/ota_meta", metaPayload.toByteArray(Charsets.UTF_8))
+                .await()
+
+            SomaMobileState.setOtaStatus("Отправка ($sizeMb МБ) на ${targetNode.displayName}...")
 
             val channelClient = Wearable.getChannelClient(context)
             val channel = channelClient.openChannel(targetNode.id, "/soma/ota_apk").await()
             val outputStream = channelClient.getOutputStream(channel).await()
 
+            var sentBytes = 0L
             wearApkFile.inputStream().use { input ->
                 outputStream.use { output ->
                     val buffer = ByteArray(16 * 1024)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
                         output.write(buffer, 0, read)
+                        sentBytes += read
+                        if (totalBytes > 0L) {
+                            SomaMobileState.setOtaProgress((sentBytes.toFloat() / totalBytes).coerceIn(0f, 1f))
+                        }
                     }
                     output.flush()
                 }
             }
 
+            SomaMobileState.setOtaProgress(1f)
             SomaMobileState.setOtaStatus("APK ($sizeMb МБ) передан на ${targetNode.displayName}! Подтвердите установку на часах.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push Wear OTA", e)
             SomaMobileState.setOtaStatus("Ошибка отправки на часы: ${e.localizedMessage}")
+            notifyWatchStatus(context, "DONE:Ошибка отправки: ${e.localizedMessage}")
         } finally {
             SomaMobileState.setBusy(false)
+            SomaMobileState.setOtaProgress(null)
             if (wakeLock.isHeld) wakeLock.release()
         }
     }
@@ -132,7 +153,8 @@ object GitHubOtaManager {
     suspend fun downloadAndInstallMobileOta(context: Context, mobileApkUrl: String) = withContext(Dispatchers.IO) {
         try {
             SomaMobileState.setBusy(true)
-            SomaMobileState.setOtaStatus("Скачиваем mobile-debug.apk из GitHub...")
+            SomaMobileState.setOtaProgress(null)
+            SomaMobileState.setOtaStatus("Скачиваем mobile APK из GitHub...")
             val mobileApkFile = File(context.cacheDir, "soma-mobile-ota.apk")
             if (mobileApkFile.exists()) mobileApkFile.delete()
             downloadFile(mobileApkUrl, mobileApkFile)
@@ -153,6 +175,7 @@ object GitHubOtaManager {
             SomaMobileState.setOtaStatus("Ошибка обновления телефона: ${e.localizedMessage}")
         } finally {
             SomaMobileState.setBusy(false)
+            SomaMobileState.setOtaProgress(null)
         }
     }
 

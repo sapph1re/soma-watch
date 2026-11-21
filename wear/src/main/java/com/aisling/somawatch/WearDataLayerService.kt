@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class WearDataLayerService : WearableListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -29,11 +30,11 @@ class WearDataLayerService : WearableListenerService() {
 
         when (messageEvent.path) {
             "/soma/ping" -> {
-                vibrate(120)
+                vibrate(100)
                 SomaWearState.recordPing(payload.ifEmpty { "Телефон" })
                 scope.launch {
                     runCatching {
-                        val reply = "Soma Watch (v${BuildConfig.VERSION_NAME}) на связи!"
+                        val reply = "Soma Watch v${BuildConfig.VERSION_NAME} на связи!"
                         Wearable.getMessageClient(this@WearDataLayerService)
                             .sendMessage(
                                 messageEvent.sourceNodeId,
@@ -44,18 +45,34 @@ class WearDataLayerService : WearableListenerService() {
                 }
             }
             "/soma/ota_status" -> {
-                SomaWearState.updateOtaProgress(payload)
+                if (payload.startsWith("DONE:")) {
+                    SomaWearState.finishOtaMessage(payload.removePrefix("DONE:").trim())
+                } else {
+                    SomaWearState.startOtaIndeterminate(payload)
+                }
+            }
+            "/soma/ota_meta" -> {
+                // Format: "<totalBytes>|<versionLabel>"
+                val parts = payload.split("|", limit = 2)
+                val bytes = parts.getOrNull(0)?.toLongOrNull() ?: 0L
+                val version = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+                expectedOtaBytes.set(bytes)
+                SomaWearState.startOtaIndeterminate(
+                    message = "Приём обновления...",
+                    totalBytes = bytes,
+                    versionLabel = version
+                )
             }
             "/soma/jules_result" -> {
-                vibrate(160)
-                SomaWearState.recordJulesResult(payload)
+                vibrate(140)
+                SomaWearState.recordAgentResult(payload)
             }
             "/soma/voice_transcribed" -> {
                 vibrate(90)
                 if (payload.startsWith("ERR:")) {
                     SomaWearState.updateStatus(payload.removePrefix("ERR:").trim())
                 } else {
-                    SomaWearState.updateStatus("Gemini расшифровал:")
+                    SomaWearState.updateStatus("Gemini расшифровал")
                     SomaWearState.setPendingVoicePrompt(payload)
                 }
             }
@@ -71,9 +88,9 @@ class WearDataLayerService : WearableListenerService() {
             }
 
             Log.i(TAG, "Receiving OTA APK over ChannelClient...")
-            vibrate(100)
-            SomaWearState.setOtaBusy(true)
-            SomaWearState.updateOtaProgress("Приём OTA по Bluetooth...")
+            vibrate(90)
+            val expected = expectedOtaBytes.get()
+            SomaWearState.updateOtaTransfer(0L, expected)
 
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SomaWatch:OtaReceive")
@@ -89,7 +106,7 @@ class WearDataLayerService : WearableListenerService() {
                         .await()
 
                     var totalBytes = 0L
-                    var lastReportedKb = 0L
+                    var lastReportedBytes = 0L
                     inputStream.use { input ->
                         otaFile.outputStream().use { output ->
                             val buffer = ByteArray(16 * 1024)
@@ -97,27 +114,23 @@ class WearDataLayerService : WearableListenerService() {
                             while (input.read(buffer).also { read = it } != -1) {
                                 output.write(buffer, 0, read)
                                 totalBytes += read
-                                val kb = totalBytes / 1024
-                                if (kb - lastReportedKb >= 64) {
-                                    lastReportedKb = kb
-                                    val mb = totalBytes / (1024.0 * 1024.0)
-                                    SomaWearState.updateOtaProgress(
-                                        String.format("Загрузка OTA: %.1f МБ", mb)
-                                    )
+                                if (totalBytes - lastReportedBytes >= 24 * 1024) {
+                                    lastReportedBytes = totalBytes
+                                    SomaWearState.updateOtaTransfer(totalBytes, expectedOtaBytes.get())
                                 }
                             }
                             output.flush()
                         }
                     }
 
+                    SomaWearState.updateOtaTransfer(totalBytes, totalBytes)
                     Log.i(TAG, "OTA APK received ($totalBytes bytes). Launching installer...")
                     WearOtaInstaller.installApk(this@WearDataLayerService, otaFile)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed receiving OTA APK over channel", e)
-                    SomaWearState.updateOtaProgress("Ошибка приёма OTA: ${e.localizedMessage}")
+                    SomaWearState.finishOtaMessage("Ошибка OTA: ${e.localizedMessage}")
                 } finally {
                     isReceivingOta.set(false)
-                    SomaWearState.setOtaBusy(false)
                     if (wakeLock.isHeld) wakeLock.release()
                 }
             }
@@ -138,5 +151,6 @@ class WearDataLayerService : WearableListenerService() {
     companion object {
         private const val TAG = "SomaWearDataLayer"
         private val isReceivingOta = AtomicBoolean(false)
+        private val expectedOtaBytes = AtomicLong(0L)
     }
 }
