@@ -53,6 +53,9 @@ data class BiometricsUiState(
     val recoveryElapsedSec: Int = 0,
     val hrr1Drop: Int? = null,
     val hrr2Drop: Int? = null,
+    // Auto-detected dynamic/strength workout prompt
+    val autoWorkoutSuggestion: String? = null,
+    val isMovingActively: Boolean = false,
     // Weekly persistent budget
     val weekly: WeeklyCardioStats = WeeklyCardioStats(
         weekKey = "",
@@ -80,12 +83,29 @@ object SomaBiometricsEngine : SensorEventListener {
     private var appContext: Context? = null
     private var sensorManager: SensorManager? = null
     private var tickerJob: Job? = null
+    private var passiveJob: Job? = null
     private var loggedRawSampleCount = 0
 
     // Rolling IBI window (ms) for RMSSD HRV computation
     private val ibiWindowMs = ArrayDeque<Double>(32)
     private var lastHrSum = 0L
     private var lastHrCount = 0L
+
+    // Auto-workout detection & passive HRR tracking
+    private var rollingAccelMag = 0.0
+    private var activeEffortSeconds = 0
+    private var lastAutoSuggestMs = 0L
+    private var passivePeakHr = 0
+    private var passiveHighHrSec = 0
+    private var passiveRecoveryActive = false
+    private var passiveRecoverySec = 0
+    private var passiveHrr1: Int? = null
+    private var lastTelemetrySyncMs = 0L
+
+    fun dismissAutoWorkoutSuggestion() {
+        _state.value = _state.value.copy(autoWorkoutSuggestion = null)
+        lastAutoSuggestMs = System.currentTimeMillis()
+    }
 
     fun init(context: Context) {
         val ctx = context.applicationContext
@@ -100,11 +120,91 @@ object SomaBiometricsEngine : SensorEventListener {
     fun startPassiveMonitoring(context: Context) {
         init(context)
         registerSensors(context.applicationContext)
+        startPassiveObserver(context.applicationContext)
     }
 
     fun stopPassiveMonitoringIfIdle() {
-        if (_state.value.phase == WorkoutPhase.IDLE) {
+        if (_state.value.phase == WorkoutPhase.IDLE && !SomaNoiseMonitor.state.value.isMonitoring) {
+            passiveJob?.cancel()
+            passiveJob = null
             unregisterSensors()
+        }
+    }
+
+    private fun startPassiveObserver(ctx: Context) {
+        if (passiveJob?.isActive == true) return
+        passiveJob = scope.launch {
+            while (isActive) {
+                delay(2000L)
+                val s = _state.value
+                val now = System.currentTimeMillis()
+
+                // Periodic telemetry sync to OnePlus 15 SQLite DB (every 3 minutes when HR/HRV present)
+                if (s.currentHr > 35 && now - lastTelemetrySyncMs >= 180_000L) {
+                    lastTelemetrySyncMs = now
+                    syncTelemetrySampleToPhone(ctx, s)
+                }
+
+                if (s.phase != WorkoutPhase.IDLE) {
+                    activeEffortSeconds = 0
+                    passiveRecoveryActive = false
+                    continue
+                }
+
+                val hr = s.currentHr
+                val moving = rollingAccelMag > 1.35 // catches push-ups, squats, kettlebells even with 0 steps
+                if (s.isMovingActively != moving) {
+                    _state.value = s.copy(isMovingActively = moving)
+                }
+
+                // 1) Auto-detect dynamic/strength workout: HR >= 58% maxHr AND active acceleration for >= 40s
+                val effortThreshold = (s.weekly.maxHr * 0.58f).roundToInt()
+                if (SomaBiometricsStore.isAutoDetectEnabled(ctx) && hr >= effortThreshold && moving) {
+                    activeEffortSeconds += 2
+                    if (activeEffortSeconds >= 40 && s.autoWorkoutSuggestion == null && now - lastAutoSuggestMs > 10 * 60 * 1000L) {
+                        lastAutoSuggestMs = now
+                        vibrate(ctx, 110)
+                        _state.value = _state.value.copy(
+                            autoWorkoutSuggestion = "Нагрузка ($hr BPM) — записать?"
+                        )
+                    }
+                } else {
+                    activeEffortSeconds = (activeEffortSeconds - 2).coerceAtLeast(0)
+                }
+
+                // 2) Passive background HRR-1 / HRR-2 after spontaneous exertion (HR >= 125 BPM for >= 40s)
+                if (!passiveRecoveryActive) {
+                    if (hr >= 125) {
+                        passiveHighHrSec += 2
+                        passivePeakHr = maxOf(passivePeakHr, hr)
+                    } else if (passiveHighHrSec >= 40 && !moving && hr in 40 until passivePeakHr) {
+                        // Exertion ended -> passively measure HRR-1 (60s) and HRR-2 (120s)!
+                        passiveRecoveryActive = true
+                        passiveRecoverySec = 0
+                        passiveHrr1 = null
+                        passiveHighHrSec = 0
+                        Log.i(TAG, "Passive HRR tracking started from peak $passivePeakHr BPM")
+                    } else if (hr < 115) {
+                        passiveHighHrSec = (passiveHighHrSec - 2).coerceAtLeast(0)
+                        if (passiveHighHrSec == 0) passivePeakHr = 0
+                    }
+                } else {
+                    passiveRecoverySec += 2
+                    if (passiveRecoverySec in 60..61 && hr > 35) {
+                        passiveHrr1 = (passivePeakHr - hr).coerceAtLeast(0)
+                        SomaBiometricsStore.saveLastHrr(ctx, passiveHrr1, null)
+                        refreshWeeklyFromStore(ctx)
+                    }
+                    if (passiveRecoverySec >= 120 && hr > 35) {
+                        val hrr2 = (passivePeakHr - hr).coerceAtLeast(0)
+                        SomaBiometricsStore.saveLastHrr(ctx, passiveHrr1, hrr2)
+                        refreshWeeklyFromStore(ctx)
+                        syncPassiveHrrToPhone(ctx, passivePeakHr, passiveHrr1, hrr2)
+                        passiveRecoveryActive = false
+                        passivePeakHr = 0
+                    }
+                }
+            }
         }
     }
 
@@ -211,6 +311,12 @@ object SomaBiometricsEngine : SensorEventListener {
             val ok = sm.registerListener(this, rawSensor, SensorManager.SENSOR_DELAY_NORMAL)
             Log.i(TAG, "Registered Samsung HR Raw (69682): $ok")
             registeredAny = registeredAny || ok
+        }
+
+        // Linear acceleration for dynamic/strength workout auto-detection (push-ups, squats, etc.)
+        val accel = sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        if (accel != null) {
+            sm.registerListener(this, accel, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
         _state.value = _state.value.copy(isSensorActive = registeredAny)
@@ -332,6 +438,16 @@ object SomaBiometricsEngine : SensorEventListener {
                 }
             }
 
+            Sensor.TYPE_LINEAR_ACCELERATION -> {
+                if (values.size >= 3) {
+                    val mag = sqrt(
+                        (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toDouble()
+                    )
+                    // Exponential moving average of movement intensity
+                    rollingAccelMag = rollingAccelMag * 0.85 + mag * 0.15
+                }
+            }
+
             SAMSUNG_HR_RAW_TYPE -> {
                 if (loggedRawSampleCount < 6) {
                     loggedRawSampleCount++
@@ -424,6 +540,51 @@ object SomaBiometricsEngine : SensorEventListener {
                 }
                 Log.i(TAG, "Synced workout summary to phone: $json")
             }.onFailure { Log.w(TAG, "Failed syncing workout summary", it) }
+        }
+    }
+
+    private fun syncTelemetrySampleToPhone(ctx: Context, s: BiometricsUiState) {
+        scope.launch {
+            runCatching {
+                val json = JSONObject().apply {
+                    put("timestamp", System.currentTimeMillis())
+                    put("hr", s.currentHr)
+                    put("hrvMs", s.currentHrvMs ?: -1)
+                    put("zone", s.currentZone)
+                    put("db", SomaNoiseMonitor.state.value.currentDb)
+                }
+                val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(ctx)
+                        .sendMessage(
+                            node.id,
+                            "/soma/telemetry_sample",
+                            json.toString().toByteArray(Charsets.UTF_8)
+                        ).await()
+                }
+            }
+        }
+    }
+
+    private fun syncPassiveHrrToPhone(ctx: Context, peakHr: Int, hrr1: Int?, hrr2: Int?) {
+        scope.launch {
+            runCatching {
+                val json = JSONObject().apply {
+                    put("timestamp", System.currentTimeMillis())
+                    put("peakHr", peakHr)
+                    put("hrr1", hrr1 ?: -1)
+                    put("hrr2", hrr2 ?: -1)
+                }
+                val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(ctx)
+                        .sendMessage(
+                            node.id,
+                            "/soma/passive_hrr",
+                            json.toString().toByteArray(Charsets.UTF_8)
+                        ).await()
+                }
+            }
         }
     }
 

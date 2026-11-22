@@ -31,13 +31,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material3.Button
@@ -49,8 +52,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.core.content.FileProvider
+import androidx.health.connect.client.PermissionController
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -93,6 +99,7 @@ class MobileMainActivity : ComponentActivity() {
         MobileBiometricsStore.loadLastSummary(this)?.let {
             SomaMobileState.setLastBioSummary(it)
         }
+        SomaMobileState.setHealthDbStats(SomaHealthDb.get(this).loadStats())
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
@@ -118,12 +125,33 @@ fun SomaCompanionScreen() {
     val otaProgress by SomaMobileState.otaProgress.collectAsState()
     val latestRelease by SomaMobileState.latestRelease.collectAsState()
     val lastBio by SomaMobileState.lastBioSummary.collectAsState()
+    val dbStats by SomaMobileState.healthDbStats.collectAsState()
+    val hcStatus by SomaMobileState.healthConnectStatus.collectAsState()
+    val localApiUrl by SomaLocalApiServer.runningUrl.collectAsState()
     val isBusy by SomaMobileState.isBusy.collectAsState()
 
     val savedGoals = remember { MobileBiometricsStore.loadGoals(context) }
     var maxHrInput by remember { mutableStateOf(savedGoals.first.toString()) }
     var z2GoalInput by remember { mutableStateOf(savedGoals.second.toString()) }
     var vigGoalInput by remember { mutableStateOf(savedGoals.third.toString()) }
+    var noiseDbInput by remember { mutableStateOf(MobileBiometricsStore.loadNoiseThreshold(context).toString()) }
+
+    val hcPermLauncher = rememberLauncherForActivityResult(
+        contract = PermissionController.createRequestPermissionResultContract()
+    ) { granted ->
+        if (granted.isNotEmpty()) {
+            scope.launch {
+                SomaMobileState.setHealthConnectStatus("Синхронизация сна и HRV за 30 дней...")
+                val res = HealthConnectManager.syncLast30Days(context)
+                SomaMobileState.setHealthDbStats(SomaHealthDb.get(context).loadStats())
+                SomaMobileState.setHealthConnectStatus(
+                    res.fold(onSuccess = { it }, onFailure = { "Ошибка: ${it.localizedMessage}" })
+                )
+            }
+        } else {
+            SomaMobileState.setHealthConnectStatus("Разрешения Health Connect не выданы")
+        }
+    }
 
     var promptDraft by remember { mutableStateOf("") }
     var tokenInput by remember { mutableStateOf(GitHubJulesClient.getSavedToken(context)) }
@@ -287,7 +315,15 @@ fun SomaCompanionScreen() {
                         value = vigGoalInput,
                         onValueChange = { vigGoalInput = it.filter { ch -> ch.isDigit() } },
                         modifier = Modifier.weight(1f),
-                        label = { Text("HIIT мин", fontSize = 11.sp) },
+                        label = { Text("HIIT", fontSize = 11.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = noiseDbInput,
+                        onValueChange = { noiseDbInput = it.filter { ch -> ch.isDigit() } },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Шум дБ", fontSize = 11.sp) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true
                     )
@@ -298,8 +334,9 @@ fun SomaCompanionScreen() {
                         val mHr = maxHrInput.toIntOrNull() ?: 185
                         val z2 = z2GoalInput.toIntOrNull() ?: 150
                         val vig = vigGoalInput.toIntOrNull() ?: 75
-                        MobileBiometricsStore.saveGoals(context, mHr, z2, vig)
-                        scope.launch { syncGoalsToWatch(context, mHr, z2, vig) }
+                        val noiseDb = noiseDbInput.toIntOrNull() ?: 85
+                        MobileBiometricsStore.saveGoals(context, mHr, z2, vig, noiseDb)
+                        scope.launch { syncGoalsToWatch(context, mHr, z2, vig, noiseDb) }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -308,7 +345,158 @@ fun SomaCompanionScreen() {
                         contentColor = Color.White
                     )
                 ) {
-                    Text("Синхронизировать цели с Galaxy Watch 8")
+                    Text("Синхронизировать цели и порог шума с часами")
+                }
+            }
+        }
+
+        // 1b. Sleep (Health Connect), Longitudinal HRV & Claude Code Export / Local API Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CompanionColors.CardBorder),
+            colors = CardDefaults.cardColors(containerColor = CompanionColors.CardBg)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Bedtime,
+                        contentDescription = null,
+                        tint = CompanionColors.Purple,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Сон, HRV и интерфейс Claude Code",
+                        color = CompanionColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = hcStatus,
+                    color = CompanionColors.Cyan,
+                    fontSize = 12.sp
+                )
+
+                Text(
+                    text = buildString {
+                        append("HRV (7д / 30д): ${dbStats.avgHrv7d?.let { "${it}ms" } ?: "--"} / ${dbStats.avgHrv30d?.let { "${it}ms" } ?: "--"}")
+                        dbStats.latestSleepSummary?.let { append("\nСон: $it") }
+                        append("\nБД SQLite: ${dbStats.sleepCount} ночей • ${dbStats.workoutCount} трен. • ${dbStats.hrrEventsCount} HRR • ${dbStats.noiseEventsCount} шум")
+                    },
+                    color = CompanionColors.TextSecondary,
+                    fontSize = 12.sp
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                if (!HealthConnectManager.isAvailable(context)) {
+                                    SomaMobileState.setHealthConnectStatus("Установи/включи Health Connect в настройках Android")
+                                    return@launch
+                                }
+                                if (HealthConnectManager.hasAllPermissions(context)) {
+                                    SomaMobileState.setHealthConnectStatus("Синхронизация сна и HRV...")
+                                    val res = HealthConnectManager.syncLast30Days(context)
+                                    SomaMobileState.setHealthDbStats(SomaHealthDb.get(context).loadStats())
+                                    SomaMobileState.setHealthConnectStatus(
+                                        res.fold(onSuccess = { it }, onFailure = { "Ошибка: ${it.localizedMessage}" })
+                                    )
+                                } else {
+                                    hcPermLauncher.launch(HealthConnectManager.REQUIRED_PERMISSIONS)
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CompanionColors.Purple,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Синхр. сон/HRV", fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            runCatching {
+                                val file = SomaHealthDb.get(context).writeExportFile(context)
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file
+                                )
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Экспорт Soma Health JSON"))
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CompanionColors.SlateButton,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Share,
+                            contentDescription = "Экспорт",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("JSON", fontSize = 12.sp)
+                    }
+                }
+
+                // Local Wi-Fi HTTP API toggle for Claude Code
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Hub,
+                            contentDescription = null,
+                            tint = if (localApiUrl != null) CompanionColors.Emerald else CompanionColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Wi-Fi API для Claude Code",
+                                color = CompanionColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = localApiUrl ?: "Порт 8787 (/api/health, /api/summary.md)",
+                                color = if (localApiUrl != null) CompanionColors.Emerald else CompanionColors.TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = localApiUrl != null,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                SomaLocalApiServer.start(context)
+                            } else {
+                                SomaLocalApiServer.stop()
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -708,20 +896,20 @@ fun SomaCompanionScreen() {
     }
 }
 
-private suspend fun syncGoalsToWatch(context: Context, maxHr: Int, z2Goal: Int, vigGoal: Int) {
+private suspend fun syncGoalsToWatch(context: Context, maxHr: Int, z2Goal: Int, vigGoal: Int, noiseDb: Int) {
     try {
         val nodes = Wearable.getNodeClient(context).connectedNodes.await()
         if (nodes.isEmpty()) {
             SomaMobileState.recordWatchMessage("Часы не найдены")
             return
         }
-        val payload = "$maxHr|$z2Goal|$vigGoal"
+        val payload = "$maxHr|$z2Goal|$vigGoal|$noiseDb|true"
         nodes.forEach { node ->
             Wearable.getMessageClient(context)
                 .sendMessage(node.id, "/soma/update_goals", payload.toByteArray(Charsets.UTF_8))
                 .await()
         }
-        SomaMobileState.recordWatchMessage("Цели отправлены: MaxHR $maxHr, Z2 ${z2Goal}м, HIIT ${vigGoal}м")
+        SomaMobileState.recordWatchMessage("Синхронизировано: MaxHR $maxHr, Z2 ${z2Goal}м, HIIT ${vigGoal}м, Шум >${noiseDb}дБ")
     } catch (e: Exception) {
         SomaMobileState.recordWatchMessage("Ошибка: ${e.localizedMessage}")
     }

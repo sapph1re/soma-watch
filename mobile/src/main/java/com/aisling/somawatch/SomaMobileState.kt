@@ -37,11 +37,25 @@ object SomaMobileState {
     private val _lastBioSummary = MutableStateFlow<SyncedBiometricsSummary?>(null)
     val lastBioSummary: StateFlow<SyncedBiometricsSummary?> = _lastBioSummary
 
+    private val _healthDbStats = MutableStateFlow(HealthDbStats())
+    val healthDbStats: StateFlow<HealthDbStats> = _healthDbStats
+
+    private val _healthConnectStatus = MutableStateFlow("Health Connect готов (сон + HRV из Samsung Health)")
+    val healthConnectStatus: StateFlow<String> = _healthConnectStatus
+
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy
 
     fun setLastBioSummary(summary: SyncedBiometricsSummary?) {
         _lastBioSummary.value = summary
+    }
+
+    fun setHealthDbStats(stats: HealthDbStats) {
+        _healthDbStats.value = stats
+    }
+
+    fun setHealthConnectStatus(status: String) {
+        _healthConnectStatus.value = status
     }
 
     fun setConnectedWatch(name: String) {

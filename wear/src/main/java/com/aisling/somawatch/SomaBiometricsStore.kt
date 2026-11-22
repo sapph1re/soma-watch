@@ -103,4 +103,28 @@ object SomaBiometricsStore {
             .putInt("vig_goal_min", vigGoalMin.coerceIn(15, 300))
             .apply()
     }
+
+    fun getNoiseThresholdDb(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("noise_threshold_db", 85)
+
+    fun setNoiseThresholdDb(context: Context, db: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt("noise_threshold_db", db.coerceIn(60, 110)).apply()
+    }
+
+    fun isNoiseAlertEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("noise_alert_enabled", false)
+
+    fun setNoiseAlertEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean("noise_alert_enabled", enabled).apply()
+    }
+
+    fun isAutoDetectEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("auto_detect_enabled", true)
+
+    fun setAutoDetectEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean("auto_detect_enabled", enabled).apply()
+    }
 }

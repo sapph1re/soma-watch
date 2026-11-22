@@ -54,12 +54,13 @@ object MobileBiometricsStore {
         return saveWorkoutSummary(context, raw)
     }
 
-    fun saveGoals(context: Context, maxHr: Int, z2Goal: Int, vigGoal: Int) {
+    fun saveGoals(context: Context, maxHr: Int, z2Goal: Int, vigGoal: Int, noiseDb: Int = 85) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putInt("max_hr", maxHr)
             .putInt("z2_goal", z2Goal)
             .putInt("vig_goal", vigGoal)
+            .putInt("noise_db", noiseDb.coerceIn(60, 110))
             .apply()
     }
 
@@ -71,4 +72,7 @@ object MobileBiometricsStore {
             p.getInt("vig_goal", 75)
         )
     }
+
+    fun loadNoiseThreshold(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("noise_db", 85)
 }

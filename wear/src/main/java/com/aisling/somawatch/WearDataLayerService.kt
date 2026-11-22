@@ -78,15 +78,19 @@ class WearDataLayerService : WearableListenerService() {
                 )
             }
             "/soma/update_goals" -> {
-                // Format: "<maxHr>|<z2GoalMin>|<vigGoalMin>"
+                // Format: "<maxHr>|<z2GoalMin>|<vigGoalMin>|<noiseThresholdDb>|<autoDetect>"
                 val parts = payload.split("|")
                 val maxHr = parts.getOrNull(0)?.toIntOrNull() ?: 185
                 val z2 = parts.getOrNull(1)?.toIntOrNull() ?: 150
                 val vig = parts.getOrNull(2)?.toIntOrNull() ?: 75
+                val noiseDb = parts.getOrNull(3)?.toIntOrNull() ?: 85
+                val autoDetect = parts.getOrNull(4)?.toBooleanStrictOrNull() ?: true
                 SomaBiometricsStore.updateGoals(this, maxHr, z2, vig)
+                SomaNoiseMonitor.updateThreshold(this, noiseDb)
+                SomaBiometricsStore.setAutoDetectEnabled(this, autoDetect)
                 SomaBiometricsEngine.refreshWeeklyFromStore(this)
                 vibrate(80)
-                SomaWearState.updateStatus("Цели: Z2 ${z2}м, HIIT ${vig}м")
+                SomaWearState.updateStatus("Цели: Z2 ${z2}м • Шум >${noiseDb}дБ")
             }
             "/soma/jules_result" -> {
                 vibrate(140)

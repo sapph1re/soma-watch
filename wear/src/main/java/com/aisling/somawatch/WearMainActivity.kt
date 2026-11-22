@@ -41,12 +41,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Smartphone
@@ -144,6 +145,7 @@ class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SomaBiometricsEngine.init(this)
+        SomaNoiseMonitor.init(this)
         if (intent?.getBooleanExtra("just_updated", false) == true) {
             SomaWearState.finishOtaMessage("Обновлено до v${BuildConfig.VERSION_NAME} ✓")
             SomaWearState.setAvailableUpdate(null)
@@ -200,6 +202,7 @@ fun SomaRootScreen() {
     val availableUpdate by SomaWearState.availableUpdate.collectAsState()
     val pendingPrompt by SomaWearState.pendingVoicePrompt.collectAsState()
     val bio by SomaBiometricsEngine.state.collectAsState()
+    val noise by SomaNoiseMonitor.state.collectAsState()
 
     val voiceRecorder = remember { WearVoiceRecorder(context) }
     var isRecording by remember { mutableStateOf(false) }
@@ -372,17 +375,46 @@ fun SomaRootScreen() {
             else -> {
                 MainDashboardView(
                     bio = bio,
+                    noise = noise,
                     statusMessage = statusMessage,
                     lastSyncInfo = lastSyncInfo,
                     otaState = otaState,
                     availableUpdate = availableUpdate,
                     onStartWorkout = {
                         triggerVibration(context, 80)
+                        SomaBiometricsEngine.dismissAutoWorkoutSuggestion()
                         if (hasHrPermission(context)) {
                             SomaBiometricsEngine.startWorkout(context)
                         } else {
                             pendingWorkoutStart = true
                             hrPermLauncher.launch(requiredHrPermissions())
+                        }
+                    },
+                    onDismissAutoWorkout = {
+                        SomaBiometricsEngine.dismissAutoWorkoutSuggestion()
+                    },
+                    onToggleNoiseMonitor = {
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasMic) {
+                            triggerVibration(context, 50)
+                            SomaNoiseMonitor.toggleMonitoring(context, !noise.isMonitoring)
+                        } else {
+                            micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    onMeasureNoiseOnce = {
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasMic) {
+                            triggerVibration(context, 40)
+                            SomaNoiseMonitor.measureOnce(context)
+                        } else {
+                            micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
                     onStartVoice = {
@@ -425,11 +457,15 @@ fun SomaRootScreen() {
 @Composable
 private fun MainDashboardView(
     bio: BiometricsUiState,
+    noise: NoiseUiState,
     statusMessage: String,
     lastSyncInfo: String,
     otaState: OtaUiState,
     availableUpdate: AvailableOta?,
     onStartWorkout: () -> Unit,
+    onDismissAutoWorkout: () -> Unit,
+    onToggleNoiseMonitor: () -> Unit,
+    onMeasureNoiseOnce: () -> Unit,
     onStartVoice: () -> Unit,
     onInstallOta: () -> Unit,
     onCheckOtaManual: () -> Unit,
@@ -547,6 +583,37 @@ private fun MainDashboardView(
                 }
             }
 
+            // Auto-detected Dynamic/Strength Workout Prompt (if detected by HR + Linear Accel)
+            bio.autoWorkoutSuggestion?.let { suggestion ->
+                item {
+                    Chip(
+                        onClick = onStartWorkout,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ChipDefaults.gradientBackgroundChipColors(
+                            startBackgroundColor = SomaColors.Orange,
+                            endBackgroundColor = SomaColors.Coral
+                        ),
+                        icon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = suggestion,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2
+                            )
+                        }
+                    )
+                }
+            }
+
             // 3. Primary Action: Non-Minimizing Always-On Workout / Run
             item {
                 Chip(
@@ -567,7 +634,7 @@ private fun MainDashboardView(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.DirectionsRun,
+                                imageVector = Icons.AutoMirrored.Rounded.DirectionsRun,
                                 contentDescription = "Бег",
                                 tint = Color.White,
                                 modifier = Modifier.size(19.dp)
@@ -630,6 +697,82 @@ private fun MainDashboardView(
                             text = "Zone 3 (темп): ${w.zone3Minutes} мин",
                             color = SomaColors.Amber.copy(alpha = 0.85f),
                             fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+
+            // 4b. Battery-Smart Duty-Cycled Decibel Meter Card
+            item {
+                val dbColor = when {
+                    noise.currentDb >= noise.thresholdDb -> SomaColors.Coral
+                    noise.currentDb >= 70 -> SomaColors.Amber
+                    noise.currentDb > 0 -> SomaColors.Emerald
+                    else -> SomaColors.TextMuted
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SomaColors.Surface)
+                        .border(
+                            1.dp,
+                            if (noise.isLoudAlert) SomaColors.Coral else SomaColors.Border,
+                            RoundedCornerShape(16.dp)
+                        )
+                        .clickable { onMeasureNoiseOnce() }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.GraphicEq,
+                                contentDescription = "Шум",
+                                tint = dbColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (noise.currentDb > 0) "${noise.currentDb} дБ" else "-- дБ",
+                                color = SomaColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (noise.isMonitoring) SomaColors.EmeraldContainer else SomaColors.SurfaceElevated)
+                                .clickable { onToggleNoiseMonitor() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = if (noise.isMonitoring) "ФОН ВКЛ" else "АЛЕРТ >${noise.thresholdDb}",
+                                color = if (noise.isMonitoring) SomaColors.Emerald else SomaColors.TextSecondary,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    val dbFraction = ((noise.currentDb - 30f) / 80f).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(SomaColors.SurfaceElevated)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(dbFraction)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(dbColor)
                         )
                     }
                 }

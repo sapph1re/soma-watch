@@ -38,10 +38,55 @@ class MobileDataLayerService : WearableListenerService() {
             "/soma/workout_summary" -> {
                 val summary = MobileBiometricsStore.saveWorkoutSummary(this, payload)
                 if (summary != null) {
+                    val z3 = runCatching { org.json.JSONObject(payload).optInt("sessionZ3Sec", 0) }.getOrDefault(0)
+                    val db = SomaHealthDb.get(this)
+                    db.insertWorkout(summary, z3)
+                    db.writeExportFile(this)
+                    SomaMobileState.setHealthDbStats(db.loadStats())
                     SomaMobileState.setLastBioSummary(summary)
                     SomaMobileState.recordWatchMessage(
                         "Тренировка: ${summary.durationSec / 60}м • ср ${summary.avgHr} BPM • Z2 ${summary.weeklyZ2Min}/${summary.weeklyZ2Goal}м"
                     )
+                }
+            }
+            "/soma/telemetry_sample" -> {
+                runCatching {
+                    val j = org.json.JSONObject(payload)
+                    val db = SomaHealthDb.get(this)
+                    db.insertTelemetry(
+                        timestamp = j.optLong("timestamp", System.currentTimeMillis()),
+                        hr = j.optInt("hr", 0),
+                        hrvMs = j.optInt("hrvMs", -1).takeIf { it > 0 },
+                        zone = j.optInt("zone", 0),
+                        noiseDb = j.optInt("db", 0).takeIf { it > 0 }
+                    )
+                    db.writeExportFile(this)
+                    SomaMobileState.setHealthDbStats(db.loadStats())
+                }
+            }
+            "/soma/passive_hrr" -> {
+                runCatching {
+                    val j = org.json.JSONObject(payload)
+                    val peak = j.optInt("peakHr", 0)
+                    val hrr1 = j.optInt("hrr1", -1).takeIf { it >= 0 }
+                    val hrr2 = j.optInt("hrr2", -1).takeIf { it >= 0 }
+                    val db = SomaHealthDb.get(this)
+                    db.insertHrrEvent(j.optLong("timestamp", System.currentTimeMillis()), "passive", peak, hrr1, hrr2)
+                    db.writeExportFile(this)
+                    SomaMobileState.setHealthDbStats(db.loadStats())
+                    SomaMobileState.recordWatchMessage("Фоновый HRR (пик $peak): -${hrr1 ?: "?"} / -${hrr2 ?: "?"} BPM")
+                }
+            }
+            "/soma/noise_event" -> {
+                runCatching {
+                    val j = org.json.JSONObject(payload)
+                    val dbVal = j.optInt("db", 0)
+                    val thr = j.optInt("thresholdDb", 85)
+                    val db = SomaHealthDb.get(this)
+                    db.insertNoiseEvent(j.optLong("timestamp", System.currentTimeMillis()), dbVal, thr)
+                    db.writeExportFile(this)
+                    SomaMobileState.setHealthDbStats(db.loadStats())
+                    SomaMobileState.recordWatchMessage("Алерт шума: $dbVal дБ (порог $thr дБ)")
                 }
             }
             "/soma/check_ota_version" -> {
