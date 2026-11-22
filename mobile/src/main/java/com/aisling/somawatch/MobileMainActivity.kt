@@ -660,7 +660,7 @@ fun SomaCompanionScreen() {
                 }
 
                 Button(
-                    onClick = { scope.launch { GitHubOtaManager.checkLatestRelease() } },
+                    onClick = { scope.launch { GitHubOtaManager.checkLatestRelease(notifyWatchContext = context) } },
                     enabled = !isBusy,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),

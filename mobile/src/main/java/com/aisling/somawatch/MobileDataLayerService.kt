@@ -24,6 +24,9 @@ class MobileDataLayerService : WearableListenerService() {
             "/soma/ping", "/soma/pong" -> {
                 SomaMobileState.recordWatchMessage(payload)
             }
+            "/soma/debug_hr_raw" -> {
+                Log.i(TAG, "WATCH_HR_RAW_PACKET: [$payload]")
+            }
             "/soma/voice_prompt" -> {
                 SomaMobileState.recordWatchMessage("🎙️ С часов: «$payload»")
                 scope.launch {

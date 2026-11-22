@@ -451,7 +451,22 @@ object SomaBiometricsEngine : SensorEventListener {
             SAMSUNG_HR_RAW_TYPE -> {
                 if (loggedRawSampleCount < 6) {
                     loggedRawSampleCount++
-                    Log.i(TAG, "HR_RAW sample #$loggedRawSampleCount: ${values.joinToString(", ")}")
+                    val sampleStr = values.joinToString(", ")
+                    Log.i(TAG, "HR_RAW sample #$loggedRawSampleCount: $sampleStr")
+                    if (loggedRawSampleCount == 1) {
+                        appContext?.let { ctx ->
+                            scope.launch {
+                                runCatching {
+                                    val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
+                                    nodes.forEach { node ->
+                                        Wearable.getMessageClient(ctx)
+                                            .sendMessage(node.id, "/soma/debug_hr_raw", sampleStr.toByteArray(Charsets.UTF_8))
+                                            .await()
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 // Extract valid IBI (Inter-Beat Interval in ms: 300..1600 ms) from Samsung HR Raw packet.
                 // Common Galaxy Watch layout: values[0]=HR, values[1]=IBI(ms) or values[2]=IBI(ms).

@@ -23,7 +23,10 @@ object GitHubOtaManager {
         return 100 + runNumber
     }
 
-    suspend fun checkLatestRelease(repo: String = BuildConfig.GITHUB_REPO): GitHubReleaseInfo? =
+    suspend fun checkLatestRelease(
+        repo: String = BuildConfig.GITHUB_REPO,
+        notifyWatchContext: Context? = null
+    ): GitHubReleaseInfo? =
         withContext(Dispatchers.IO) {
             try {
                 SomaMobileState.setBusy(true)
@@ -79,6 +82,17 @@ object GitHubOtaManager {
                 )
                 SomaMobileState.setLatestRelease(info)
                 SomaMobileState.setOtaStatus("Найден релиз: $name")
+                if (notifyWatchContext != null && info.wearApkUrl != null && info.remoteVersionCode > 0) {
+                    runCatching {
+                        val payload = "${info.remoteVersionCode}|${info.tagName}"
+                        val nodes = Wearable.getNodeClient(notifyWatchContext).connectedNodes.await()
+                        nodes.forEach { node ->
+                            Wearable.getMessageClient(notifyWatchContext)
+                                .sendMessage(node.id, "/soma/ota_available", payload.toByteArray(Charsets.UTF_8))
+                                .await()
+                        }
+                    }
+                }
                 info
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking GitHub releases", e)

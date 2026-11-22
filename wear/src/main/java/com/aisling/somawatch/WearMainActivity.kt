@@ -142,6 +142,8 @@ private fun zoneLabel(zone: Int): String = when (zone) {
 }
 
 class WearMainActivity : ComponentActivity() {
+    private var lastAutoOtaCheckMs = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SomaBiometricsEngine.init(this)
@@ -154,6 +156,15 @@ class WearMainActivity : ComponentActivity() {
             MaterialTheme {
                 SomaRootScreen()
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val now = System.currentTimeMillis()
+        if (now - lastAutoOtaCheckMs >= 20_000L) {
+            lastAutoOtaCheckMs = now
+            checkOtaVersionAsync(applicationContext)
         }
     }
 
@@ -527,6 +538,45 @@ private fun MainDashboardView(
                 }
             }
 
+            // 1b. Conditional Cloud OTA Update Chip — RIGHT AT THE TOP whenever a newer version exists!
+            if (availableUpdate != null) {
+                item {
+                    Chip(
+                        onClick = onInstallOta,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ChipDefaults.gradientBackgroundChipColors(
+                            startBackgroundColor = Color(0xFF0284C7),
+                            endBackgroundColor = Color(0xFF0369A1)
+                        ),
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Rounded.SystemUpdate,
+                                contentDescription = "Обновить",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = "Обновить OTA",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        secondaryLabel = {
+                            Text(
+                                text = availableUpdate.label,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.sp
+                            )
+                        }
+                    )
+                }
+            }
+
             // 2. Live Biometrics Hero Card (HR + HRV + HRR)
             item {
                 Column(
@@ -775,45 +825,6 @@ private fun MainDashboardView(
                                 .background(dbColor)
                         )
                     }
-                }
-            }
-
-            // 5. Conditional Cloud OTA Update Chip — ONLY shown when a NEWER version exists!
-            if (availableUpdate != null) {
-                item {
-                    Chip(
-                        onClick = onInstallOta,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        colors = ChipDefaults.gradientBackgroundChipColors(
-                            startBackgroundColor = Color(0xFF0284C7),
-                            endBackgroundColor = Color(0xFF0369A1)
-                        ),
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = "Обновить",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = "Обновить OTA",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        },
-                        secondaryLabel = {
-                            Text(
-                                text = availableUpdate.label,
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 10.sp
-                            )
-                        }
-                    )
                 }
             }
 
@@ -1603,6 +1614,12 @@ private fun triggerVibration(context: Context, ms: Long) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
     vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+}
+
+private fun checkOtaVersionAsync(context: Context) {
+    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        checkOtaVersionSilently(context)
+    }
 }
 
 private suspend fun checkOtaVersionSilently(context: Context) {
