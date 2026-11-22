@@ -35,6 +35,7 @@ data class NoiseUiState(
     val currentDb: Int = 0,
     val peakDbToday: Int = 0,
     val isMonitoring: Boolean = false,
+    val isSamplingNow: Boolean = false,
     val thresholdDb: Int = 85,
     val isLoudAlert: Boolean = false
 )
@@ -47,15 +48,20 @@ object SomaNoiseMonitor {
     private const val ALERT_COOLDOWN_MS = 10 * 60 * 1000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var monitorJob: Job? = null
+    private var backgroundJob: Job? = null
+    private var foregroundJob: Job? = null
     private var lastAlertTimeMs = 0L
+
+    @Volatile
+    var isVoiceRecordingActive: Boolean = false
 
     private val _state = MutableStateFlow(NoiseUiState())
     val state: StateFlow<NoiseUiState> = _state
 
     fun init(context: Context) {
         val threshold = SomaBiometricsStore.getNoiseThresholdDb(context)
-        _state.value = _state.value.copy(thresholdDb = threshold)
+        val bgOn = SomaBiometricsStore.isNoiseAlertEnabled(context)
+        _state.value = _state.value.copy(thresholdDb = threshold, isMonitoring = bgOn)
     }
 
     fun updateThreshold(context: Context, thresholdDb: Int) {
@@ -66,13 +72,39 @@ object SomaNoiseMonitor {
 
     fun toggleMonitoring(context: Context, enable: Boolean) {
         if (enable) {
-            startMonitoring(context, foregroundLive = false)
+            startBackgroundMonitoring(context)
         } else {
-            stopMonitoring(context)
+            stopBackgroundMonitoring(context)
         }
     }
 
-    fun startMonitoring(context: Context, foregroundLive: Boolean = false) {
+    /**
+     * Live foreground preview while the Watch screen is visible:
+     * takes an immediate 0.6s measurement, then refreshes every 5s.
+     * Stops automatically in onStop() so zero battery is used off-screen.
+     */
+    fun startForegroundPreview(context: Context) {
+        val ctx = context.applicationContext
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        if (foregroundJob?.isActive == true) return
+        foregroundJob = scope.launch {
+            while (isActive) {
+                if (!isVoiceRecordingActive) {
+                    sampleAndUpdate(ctx, durationMs = 600L, triggerAlerts = _state.value.isMonitoring)
+                }
+                delay(5000L)
+            }
+        }
+    }
+
+    fun stopForegroundPreview() {
+        foregroundJob?.cancel()
+        foregroundJob = null
+    }
+
+    fun startBackgroundMonitoring(context: Context) {
         val ctx = context.applicationContext
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "RECORD_AUDIO not granted; skipping noise monitor")
@@ -83,58 +115,40 @@ object SomaNoiseMonitor {
         SomaBiometricsStore.setNoiseAlertEnabled(ctx, true)
         _state.value = _state.value.copy(isMonitoring = true, thresholdDb = threshold)
 
-        monitorJob?.cancel()
-        monitorJob = scope.launch {
+        backgroundJob?.cancel()
+        backgroundJob = scope.launch {
             while (isActive) {
-                val sampleDurationMs = if (foregroundLive) 600L else 1400L
-                val db = measureSampleDb(sampleDurationMs)
-                if (db != null) {
-                    val cur = _state.value
-                    val isLoud = db >= cur.thresholdDb
-                    _state.value = cur.copy(
-                        currentDb = db,
-                        peakDbToday = maxOf(cur.peakDbToday, db),
-                        isLoudAlert = isLoud
-                    )
-
-                    if (isLoud) {
-                        // Confirm sustained noise for 3 seconds (ignores brief claps/doors)
-                        val confirmDb = measureSampleDb(3000L) ?: db
-                        if (confirmDb >= cur.thresholdDb) {
-                            _state.value = _state.value.copy(
-                                currentDb = confirmDb,
-                                peakDbToday = maxOf(_state.value.peakDbToday, confirmDb),
-                                isLoudAlert = true
-                            )
-                            maybeTriggerLoudAlert(ctx, confirmDb, cur.thresholdDb)
-                        } else {
-                            _state.value = _state.value.copy(currentDb = confirmDb, isLoudAlert = false)
-                        }
-                    }
+                if (!isVoiceRecordingActive) {
+                    sampleAndUpdate(ctx, durationMs = 1400L, triggerAlerts = true)
                 }
-                // Duty-cycle: sleep 45s in background to save battery (~3% duty cycle), or 2.5s in live mode
-                delay(if (foregroundLive) 2500L else 45_000L)
+                delay(45_000L)
             }
         }
     }
 
-    fun stopMonitoring(context: Context) {
-        monitorJob?.cancel()
-        monitorJob = null
+    fun stopBackgroundMonitoring(context: Context) {
+        backgroundJob?.cancel()
+        backgroundJob = null
         SomaBiometricsStore.setNoiseAlertEnabled(context.applicationContext, false)
         _state.value = _state.value.copy(isMonitoring = false, isLoudAlert = false)
     }
 
-    /**
-     * One-shot measurement when user taps the Noise card without keeping background loop running.
-     */
     fun measureOnce(context: Context) {
         val ctx = context.applicationContext
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return
         }
         scope.launch {
-            val db = measureSampleDb(1000L) ?: return@launch
+            if (!isVoiceRecordingActive) {
+                sampleAndUpdate(ctx, durationMs = 900L, triggerAlerts = true)
+            }
+        }
+    }
+
+    private suspend fun sampleAndUpdate(ctx: Context, durationMs: Long, triggerAlerts: Boolean) {
+        _state.value = _state.value.copy(isSamplingNow = true)
+        try {
+            val db = measureSampleDb(durationMs) ?: return
             val cur = _state.value
             val isLoud = db >= cur.thresholdDb
             _state.value = cur.copy(
@@ -142,13 +156,38 @@ object SomaNoiseMonitor {
                 peakDbToday = maxOf(cur.peakDbToday, db),
                 isLoudAlert = isLoud
             )
-            if (isLoud) {
-                maybeTriggerLoudAlert(ctx, db, cur.thresholdDb)
+
+            if (isLoud && triggerAlerts) {
+                val confirmDb = measureSampleDb(2500L) ?: db
+                if (confirmDb >= cur.thresholdDb) {
+                    _state.value = _state.value.copy(
+                        currentDb = confirmDb,
+                        peakDbToday = maxOf(_state.value.peakDbToday, confirmDb),
+                        isLoudAlert = true
+                    )
+                    maybeTriggerLoudAlert(ctx, confirmDb, cur.thresholdDb)
+                } else {
+                    _state.value = _state.value.copy(currentDb = confirmDb, isLoudAlert = false)
+                }
             }
+        } finally {
+            _state.value = _state.value.copy(isSamplingNow = false)
         }
     }
 
     private fun measureSampleDb(durationMs: Long): Int? {
+        val sources = intArrayOf(
+            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION
+        )
+        for (source in sources) {
+            val res = tryMeasureWithSource(source, durationMs)
+            if (res != null) return res
+        }
+        return null
+    }
+
+    private fun tryMeasureWithSource(audioSource: Int, durationMs: Long): Int? {
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -159,7 +198,7 @@ object SomaNoiseMonitor {
         var audioRecord: AudioRecord? = null
         return try {
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                audioSource,
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -174,7 +213,7 @@ object SomaNoiseMonitor {
             var sumSq = 0.0
             var totalSamples = 0L
 
-            while (System.currentTimeMillis() < endAt) {
+            while (System.currentTimeMillis() < endAt && !isVoiceRecordingActive) {
                 val read = audioRecord.read(buffer, 0, buffer.size)
                 if (read > 0) {
                     for (i in 0 until read) {
@@ -189,12 +228,10 @@ object SomaNoiseMonitor {
             if (totalSamples == 0L) return null
 
             val rms = sqrt(sumSq / totalSamples).coerceAtLeast(1.0)
-            // Calibrated approximation for wearable MEMS microphone (0 dBFS ~ 115 dB SPL)
             val dbfs = 20.0 * log10(rms / 32767.0)
-            val approxSpl = (dbfs + 115.0).roundToInt().coerceIn(30, 115)
-            approxSpl
+            (dbfs + 115.0).roundToInt().coerceIn(28, 115)
         } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord sample failed: ${e.localizedMessage}")
+            Log.w(TAG, "AudioRecord source=$audioSource failed: ${e.localizedMessage}")
             null
         } finally {
             runCatching { audioRecord?.release() }
@@ -206,7 +243,6 @@ object SomaNoiseMonitor {
         if (now - lastAlertTimeMs < ALERT_COOLDOWN_MS) return
         lastAlertTimeMs = now
 
-        // Distinct triple-pulse gentle vibration alert
         runCatching {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -220,7 +256,6 @@ object SomaNoiseMonitor {
             )
         }
 
-        // Post Wear OS loud-environment alert notification
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val ch = NotificationChannel(
@@ -239,7 +274,6 @@ object SomaNoiseMonitor {
             nm.notify(NOTIF_ID, notif)
         }
 
-        // Sync noise event to phone SQLite DB
         runCatching {
             val payload = JSONObject().apply {
                 put("timestamp", now)

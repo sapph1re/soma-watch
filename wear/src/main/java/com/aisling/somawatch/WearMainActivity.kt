@@ -161,6 +161,7 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        SomaNoiseMonitor.startForegroundPreview(this)
         val now = System.currentTimeMillis()
         if (now - lastAutoOtaCheckMs >= 20_000L) {
             lastAutoOtaCheckMs = now
@@ -170,6 +171,7 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        SomaNoiseMonitor.stopForegroundPreview()
         SomaBiometricsEngine.stopPassiveMonitoringIfIdle()
     }
 }
@@ -290,6 +292,7 @@ fun SomaRootScreen() {
     }
 
     LaunchedEffect(isRecording) {
+        SomaNoiseMonitor.isVoiceRecordingActive = isRecording
         if (isRecording) {
             recordSeconds = 0
             while (isRecording) {
@@ -297,6 +300,7 @@ fun SomaRootScreen() {
                 recordSeconds++
                 if (recordSeconds >= 90) {
                     isRecording = false
+                    SomaNoiseMonitor.isVoiceRecordingActive = false
                     val file = voiceRecorder.stopAndGetFile()
                     if (file != null) {
                         scope.launch { sendVoiceAudioToPhone(context, file) }
@@ -434,6 +438,7 @@ fun SomaRootScreen() {
                             Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasMic) {
+                            SomaNoiseMonitor.isVoiceRecordingActive = true
                             if (voiceRecorder.startRecording()) {
                                 triggerVibration(context, 70)
                                 isRecording = true
@@ -620,13 +625,13 @@ private fun MainDashboardView(
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
                         MetricMiniBadge(
-                            label = "HRV",
-                            value = bio.currentHrvMs?.let { "${it}ms" } ?: "--",
+                            label = if (bio.hrvSource == "HR~") "HRV~" else "HRV",
+                            value = bio.currentHrvMs?.let { "${it}ms" } ?: if (bio.currentHr > 0) "…" else "--",
                             accent = SomaColors.Cyan
                         )
                         MetricMiniBadge(
                             label = "HRR-1",
-                            value = bio.weekly.lastHrr1?.let { "-$it" } ?: "--",
+                            value = bio.weekly.lastHrr1?.let { "-$it" } ?: "после бега",
                             accent = SomaColors.Emerald
                         )
                     }
@@ -788,7 +793,11 @@ private fun MainDashboardView(
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = if (noise.currentDb > 0) "${noise.currentDb} дБ" else "-- дБ",
+                                text = when {
+                                    noise.currentDb > 0 -> "${noise.currentDb} дБ"
+                                    noise.isSamplingNow -> "замер..."
+                                    else -> "тап • дБ"
+                                },
                                 color = SomaColors.TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.ExtraBold

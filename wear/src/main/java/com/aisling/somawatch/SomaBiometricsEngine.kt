@@ -88,6 +88,13 @@ object SomaBiometricsEngine : SensorEventListener {
 
     // Rolling IBI window (ms) for RMSSD HRV computation
     private val ibiWindowMs = ArrayDeque<Double>(32)
+    private val hrEstRrWindowMs = ArrayDeque<Double>(24)
+    private var hasRealIbi = false
+    private var lastHrBeatTimestampNs = 0L
+    private var lastPpgVal = 0.0
+    private var prevPpgRising = false
+    private var lastPpgPeakNs = 0L
+    private var ppgBaseline = 0.0
     private var lastHrSum = 0L
     private var lastHrCount = 0L
 
@@ -172,19 +179,19 @@ object SomaBiometricsEngine : SensorEventListener {
                     activeEffortSeconds = (activeEffortSeconds - 2).coerceAtLeast(0)
                 }
 
-                // 2) Passive background HRR-1 / HRR-2 after spontaneous exertion (HR >= 125 BPM for >= 40s)
+                // 2) Passive background HRR-1 / HRR-2 after spontaneous exertion (HR >= 110 BPM for >= 24s)
                 if (!passiveRecoveryActive) {
-                    if (hr >= 125) {
+                    if (hr >= 110) {
                         passiveHighHrSec += 2
                         passivePeakHr = maxOf(passivePeakHr, hr)
-                    } else if (passiveHighHrSec >= 40 && !moving && hr in 40 until passivePeakHr) {
+                    } else if (passiveHighHrSec >= 24 && !moving && hr in 40 until passivePeakHr) {
                         // Exertion ended -> passively measure HRR-1 (60s) and HRR-2 (120s)!
                         passiveRecoveryActive = true
                         passiveRecoverySec = 0
                         passiveHrr1 = null
                         passiveHighHrSec = 0
                         Log.i(TAG, "Passive HRR tracking started from peak $passivePeakHr BPM")
-                    } else if (hr < 115) {
+                    } else if (hr < 102) {
                         passiveHighHrSec = (passiveHighHrSec - 2).coerceAtLeast(0)
                         if (passiveHighHrSec == 0) passivePeakHr = 0
                     }
@@ -300,16 +307,26 @@ object SomaBiometricsEngine : SensorEventListener {
 
         val hrSensor = sm.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         if (hrSensor != null) {
-            val ok = sm.registerListener(this, hrSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            val ok = sm.registerListener(this, hrSensor, SensorManager.SENSOR_DELAY_FASTEST)
             Log.i(TAG, "Registered TYPE_HEART_RATE (${hrSensor.name}): $ok")
             registeredAny = registeredAny || ok
         }
 
-        // Samsung Galaxy Watch 8 exposes com.samsung.sensor.hr_raw (69682) under READ_HEART_RATE
-        val rawSensor = sm.getDefaultSensor(SAMSUNG_HR_RAW_TYPE)
+        // Scan ALL sensors so non-wakeup vendor sensors (Samsung HR Raw 69682, TYPE_HEART_BEAT 31) are found!
+        val allSensors = sm.getSensorList(Sensor.TYPE_ALL)
+        val heartBeatSensor = allSensors.firstOrNull { it.type == Sensor.TYPE_HEART_BEAT }
+        if (heartBeatSensor != null) {
+            val ok = sm.registerListener(this, heartBeatSensor, SensorManager.SENSOR_DELAY_FASTEST)
+            Log.i(TAG, "Registered TYPE_HEART_BEAT (${heartBeatSensor.name}): $ok")
+            registeredAny = registeredAny || ok
+        }
+
+        val rawSensor = allSensors.firstOrNull {
+            it.type == SAMSUNG_HR_RAW_TYPE || it.stringType.contains("hr_raw", ignoreCase = true)
+        }
         if (rawSensor != null) {
-            val ok = sm.registerListener(this, rawSensor, SensorManager.SENSOR_DELAY_NORMAL)
-            Log.i(TAG, "Registered Samsung HR Raw (69682): $ok")
+            val ok = sm.registerListener(this, rawSensor, SensorManager.SENSOR_DELAY_FASTEST)
+            Log.i(TAG, "Registered Samsung HR Raw (${rawSensor.type} / ${rawSensor.name}): $ok")
             registeredAny = registeredAny || ok
         }
 
@@ -435,6 +452,24 @@ object SomaBiometricsEngine : SensorEventListener {
                         currentZone = zone,
                         isSensorActive = true
                     )
+                    // Fallback RR-interval HRV estimator from continuous 1 Hz HR stream when raw IBI isn't emitting yet
+                    if (!hasRealIbi && values[0] > 35f) {
+                        pushEstimatedRrFromHr(60_000.0 / values[0].toDouble())
+                    }
+                }
+            }
+
+            Sensor.TYPE_HEART_BEAT -> {
+                if (values[0] > 0.5f) {
+                    val nowNs = event.timestamp
+                    if (lastHrBeatTimestampNs > 0L) {
+                        val ibiMs = (nowNs - lastHrBeatTimestampNs) / 1_000_000.0
+                        if (ibiMs in 300.0..1600.0) {
+                            hasRealIbi = true
+                            pushIbiSample(ibiMs)
+                        }
+                    }
+                    lastHrBeatTimestampNs = nowNs
                 }
             }
 
@@ -443,7 +478,6 @@ object SomaBiometricsEngine : SensorEventListener {
                     val mag = sqrt(
                         (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toDouble()
                     )
-                    // Exponential moving average of movement intensity
                     rollingAccelMag = rollingAccelMag * 0.85 + mag * 0.15
                 }
             }
@@ -468,13 +502,17 @@ object SomaBiometricsEngine : SensorEventListener {
                         }
                     }
                 }
-                // Extract valid IBI (Inter-Beat Interval in ms: 300..1600 ms) from Samsung HR Raw packet.
-                // Common Galaxy Watch layout: values[0]=HR, values[1]=IBI(ms) or values[2]=IBI(ms).
-                val candidateIbi = values.drop(1).firstOrNull { it in 300f..1600f }?.toDouble()
-                if (candidateIbi != null) {
-                    pushIbiSample(candidateIbi)
+                // 1) Check direct IBI in ms (300..1600) or seconds (0.3..1.6)
+                val ibiMsDirect = values.drop(1).firstOrNull { it in 300f..1600f }?.toDouble()
+                    ?: values.drop(1).firstOrNull { it in 0.30f..1.60f }?.toDouble()?.times(1000.0)
+                if (ibiMsDirect != null) {
+                    hasRealIbi = true
+                    pushIbiSample(ibiMsDirect)
+                } else if (values[0] > 5000f) {
+                    // 2) Raw PPG optical waveform -> lightweight real-time peak-to-peak IBI detector
+                    processRawPpgPeak(values[0].toDouble(), event.timestamp)
                 }
-                // Also update BPM from values[0] if TYPE_HEART_RATE hasn't delivered yet
+
                 val rawHr = values[0].roundToInt()
                 if (rawHr in 35..230 && _state.value.currentHr == 0) {
                     val s = _state.value
@@ -485,6 +523,47 @@ object SomaBiometricsEngine : SensorEventListener {
                     )
                 }
             }
+        }
+    }
+
+    private fun processRawPpgPeak(sample: Double, timestampNs: Long) {
+        if (ppgBaseline == 0.0) {
+            ppgBaseline = sample
+            lastPpgVal = sample
+            return
+        }
+        ppgBaseline = ppgBaseline * 0.96 + sample * 0.04
+        val rising = sample > lastPpgVal
+        if (prevPpgRising && !rising && lastPpgVal > ppgBaseline) {
+            if (lastPpgPeakNs > 0L) {
+                val ibiMs = (timestampNs - lastPpgPeakNs) / 1_000_000.0
+                if (ibiMs in 350.0..1500.0) {
+                    hasRealIbi = true
+                    pushIbiSample(ibiMs)
+                }
+            }
+            lastPpgPeakNs = timestampNs
+        }
+        prevPpgRising = rising
+        lastPpgVal = sample
+    }
+
+    private fun pushEstimatedRrFromHr(rrMs: Double) {
+        if (hrEstRrWindowMs.size >= 20) hrEstRrWindowMs.removeFirst()
+        hrEstRrWindowMs.addLast(rrMs)
+        if (hrEstRrWindowMs.size >= 5) {
+            val list = hrEstRrWindowMs.toList()
+            var sumSq = 0.0
+            for (i in 1 until list.size) {
+                val d = list[i] - list[i - 1]
+                sumSq += d * d
+            }
+            val estRmssd = sqrt(sumSq / (list.size - 1)).roundToInt().coerceIn(8, 180)
+            _state.value = _state.value.copy(
+                currentHrvMs = estRmssd,
+                hrvSource = "HR~"
+            )
+            appContext?.let { SomaBiometricsStore.saveLastHrv(it, estRmssd) }
         }
     }
 
