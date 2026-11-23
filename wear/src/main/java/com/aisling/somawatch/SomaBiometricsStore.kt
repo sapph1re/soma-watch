@@ -2,6 +2,7 @@ package com.aisling.somawatch
 
 import android.content.Context
 import java.util.Calendar
+import kotlin.math.roundToInt
 
 data class WeeklyCardioStats(
     val weekKey: String,
@@ -15,9 +16,9 @@ data class WeeklyCardioStats(
     val lastHrr2: Int?,
     val lastHrvMs: Int?
 ) {
-    val zone2Minutes: Int get() = (zone2Seconds / 60L).toInt()
-    val zone3Minutes: Int get() = (zone3Seconds / 60L).toInt()
-    val vigorousMinutes: Int get() = (vigorousSeconds / 60L).toInt()
+    val zone2Minutes: Int get() = (zone2Seconds / 60.0).roundToInt()
+    val zone3Minutes: Int get() = (zone3Seconds / 60.0).roundToInt()
+    val vigorousMinutes: Int get() = (vigorousSeconds / 60.0).roundToInt()
 }
 
 object SomaBiometricsStore {
@@ -63,20 +64,25 @@ object SomaBiometricsStore {
         )
     }
 
-    fun addZoneSecond(context: Context, zone: Int) {
+    fun addZoneSeconds(context: Context, zone: Int, seconds: Long) {
+        if (seconds <= 0L) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val nowWeek = currentWeekKey()
+        val sameWeek = prefs.getString("week_key", "") == nowWeek
         val editor = prefs.edit()
-        if (prefs.getString("week_key", "") != nowWeek) {
+        if (!sameWeek) {
             editor.putString("week_key", nowWeek)
                 .putLong("z2_sec", 0L)
                 .putLong("z3_sec", 0L)
                 .putLong("vig_sec", 0L)
         }
+        val baseZ2 = if (sameWeek) prefs.getLong("z2_sec", 0L) else 0L
+        val baseZ3 = if (sameWeek) prefs.getLong("z3_sec", 0L) else 0L
+        val baseVig = if (sameWeek) prefs.getLong("vig_sec", 0L) else 0L
         when (zone) {
-            2 -> editor.putLong("z2_sec", prefs.getLong("z2_sec", 0L) + 1L)
-            3 -> editor.putLong("z3_sec", prefs.getLong("z3_sec", 0L) + 1L)
-            4, 5 -> editor.putLong("vig_sec", prefs.getLong("vig_sec", 0L) + 1L)
+            2 -> editor.putLong("z2_sec", baseZ2 + seconds)
+            3 -> editor.putLong("z3_sec", baseZ3 + seconds)
+            4, 5 -> editor.putLong("vig_sec", baseVig + seconds)
         }
         editor.apply()
     }
@@ -126,5 +132,39 @@ object SomaBiometricsStore {
     fun setAutoDetectEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean("auto_detect_enabled", enabled).apply()
+    }
+
+    private fun currentDayKey(): String {
+        val cal = Calendar.getInstance()
+        return "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
+    }
+
+    fun saveNoiseReading(context: Context, db: Int, timestampMs: Long) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val today = currentDayKey()
+        val savedDay = prefs.getString("peak_noise_day", "")
+        val prevPeak = if (savedDay == today) prefs.getInt("peak_noise_db", 0) else 0
+        val newPeak = maxOf(prevPeak, db)
+        prefs.edit()
+            .putInt("last_noise_db", db)
+            .putLong("last_noise_ts", timestampMs)
+            .putString("peak_noise_day", today)
+            .putInt("peak_noise_db", newPeak)
+            .apply()
+    }
+
+    fun getLastNoiseDb(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("last_noise_db", 0)
+
+    fun getLastNoiseTimestamp(context: Context): Long =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("last_noise_ts", 0L)
+
+    fun getPeakNoiseDbToday(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (prefs.getString("peak_noise_day", "") == currentDayKey()) {
+            prefs.getInt("peak_noise_db", 0)
+        } else {
+            0
+        }
     }
 }

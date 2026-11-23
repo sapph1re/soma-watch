@@ -161,6 +161,9 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (hasHrPermission(this)) {
+            SomaBiometricsEngine.startPassiveMonitoring(this)
+        }
         SomaNoiseMonitor.startForegroundPreview(this)
         val now = System.currentTimeMillis()
         if (now - lastAutoOtaCheckMs >= 20_000L) {
@@ -747,9 +750,9 @@ private fun MainDashboardView(
                         goal = w.vigorousGoalMin,
                         color = SomaColors.Coral
                     )
-                    if (w.zone3Minutes > 0) {
+                    if (w.zone3Seconds > 0L) {
                         Text(
-                            text = "Zone 3 (темп): ${w.zone3Minutes} мин",
+                            text = "Zone 3 (темп): ${formatZoneDuration(w.zone3Seconds.toInt())}",
                             color = SomaColors.Amber.copy(alpha = 0.85f),
                             fontSize = 9.sp
                         )
@@ -1108,11 +1111,19 @@ private fun ActiveWorkoutScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Z2: ${bio.sessionZone2Sec / 60}м  •  HIIT: ${bio.sessionVigorousSec / 60}м  •  Пик: ${bio.peakHr}",
+                    text = "Z2 ${formatCompactMinSec(bio.sessionZone2Sec)}  •  HIIT ${formatCompactMinSec(bio.sessionVigorousSec)}  •  Пик ${bio.peakHr}",
                     color = SomaColors.TextSecondary,
                     fontSize = 9.sp,
                     maxLines = 1
                 )
+                if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
+                    Text(
+                        text = "Z1 ${formatCompactMinSec(bio.sessionZone1Sec)}  •  Z3 ${formatCompactMinSec(bio.sessionZone3Sec)}",
+                        color = SomaColors.TextMuted,
+                        fontSize = 8.sp,
+                        maxLines = 1
+                    )
+                }
             }
 
             // Bottom: HRR Cooldown + Stop Controls
@@ -1311,7 +1322,18 @@ private fun WorkoutSummaryScreen(
             ) {
                 Text("Время: ${formatDuration(bio.elapsedSeconds)}", color = SomaColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text("Пульс ср/пик: ${bio.avgHr} / ${bio.peakHr} BPM", color = SomaColors.TextSecondary, fontSize = 11.sp)
-                Text("Zone 2: +${bio.sessionZone2Sec / 60} мин  •  HIIT: +${bio.sessionVigorousSec / 60} мин", color = SomaColors.Emerald, fontSize = 11.sp)
+                Text("Zone 2: +${formatZoneDuration(bio.sessionZone2Sec)}  •  HIIT: +${formatZoneDuration(bio.sessionVigorousSec)}", color = SomaColors.Emerald, fontSize = 11.sp)
+                if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
+                    Text(
+                        text = buildString {
+                            if (bio.sessionZone3Sec > 0) append("Zone 3: +${formatZoneDuration(bio.sessionZone3Sec)}")
+                            if (bio.sessionZone3Sec > 0 && bio.sessionZone1Sec > 0) append("  •  ")
+                            if (bio.sessionZone1Sec > 0) append("Z1: ${formatZoneDuration(bio.sessionZone1Sec)}")
+                        },
+                        color = SomaColors.Amber,
+                        fontSize = 10.sp
+                    )
+                }
                 if (bio.hrr1Drop != null || bio.hrr2Drop != null) {
                     Text(
                         text = "HRR-1: ${bio.hrr1Drop?.let { "-$it" } ?: "--"}  •  HRR-2: ${bio.hrr2Drop?.let { "-$it" } ?: "--"}",
@@ -1612,6 +1634,23 @@ private fun formatDuration(totalSec: Int): String {
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
     return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+}
+
+private fun formatCompactMinSec(totalSec: Int): String {
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return String.format("%d:%02d", m, s)
+}
+
+private fun formatZoneDuration(totalSec: Int): String {
+    if (totalSec <= 0) return "0 мин"
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return when {
+        m == 0 -> "$s с"
+        s == 0 -> "$m мин"
+        else -> "$m м $s с"
+    }
 }
 
 private fun triggerVibration(context: Context, ms: Long) {

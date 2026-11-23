@@ -3,6 +3,7 @@ package com.aisling.somawatch
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioFormat
@@ -15,6 +16,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +25,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
+import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -51,6 +55,8 @@ object SomaNoiseMonitor {
     private var backgroundJob: Job? = null
     private var foregroundJob: Job? = null
     private var lastAlertTimeMs = 0L
+    private var lastComplicationPushMs = 0L
+    private var lastComplicationDb = 0
 
     @Volatile
     var isVoiceRecordingActive: Boolean = false
@@ -59,15 +65,29 @@ object SomaNoiseMonitor {
     val state: StateFlow<NoiseUiState> = _state
 
     fun init(context: Context) {
-        val threshold = SomaBiometricsStore.getNoiseThresholdDb(context)
-        val bgOn = SomaBiometricsStore.isNoiseAlertEnabled(context)
-        _state.value = _state.value.copy(thresholdDb = threshold, isMonitoring = bgOn)
+        val ctx = context.applicationContext
+        val threshold = SomaBiometricsStore.getNoiseThresholdDb(ctx)
+        val bgOn = SomaBiometricsStore.isNoiseAlertEnabled(ctx)
+        val savedDb = SomaBiometricsStore.getLastNoiseDb(ctx)
+        val savedPeak = SomaBiometricsStore.getPeakNoiseDbToday(ctx)
+        _state.update {
+            it.copy(
+                currentDb = if (it.currentDb > 0) it.currentDb else savedDb,
+                peakDbToday = maxOf(it.peakDbToday, savedPeak),
+                thresholdDb = threshold,
+                isMonitoring = bgOn
+            )
+        }
+        if (bgOn && backgroundJob?.isActive != true) {
+            startBackgroundMonitoring(ctx)
+        }
     }
 
     fun updateThreshold(context: Context, thresholdDb: Int) {
         val clamped = thresholdDb.coerceIn(60, 110)
         SomaBiometricsStore.setNoiseThresholdDb(context, clamped)
-        _state.value = _state.value.copy(thresholdDb = clamped)
+        _state.update { it.copy(thresholdDb = clamped) }
+        requestComplicationUpdate(context.applicationContext, force = true)
     }
 
     fun toggleMonitoring(context: Context, enable: Boolean) {
@@ -113,7 +133,7 @@ object SomaNoiseMonitor {
 
         val threshold = SomaBiometricsStore.getNoiseThresholdDb(ctx)
         SomaBiometricsStore.setNoiseAlertEnabled(ctx, true)
-        _state.value = _state.value.copy(isMonitoring = true, thresholdDb = threshold)
+        _state.update { it.copy(isMonitoring = true, thresholdDb = threshold) }
 
         backgroundJob?.cancel()
         backgroundJob = scope.launch {
@@ -130,7 +150,7 @@ object SomaNoiseMonitor {
         backgroundJob?.cancel()
         backgroundJob = null
         SomaBiometricsStore.setNoiseAlertEnabled(context.applicationContext, false)
-        _state.value = _state.value.copy(isMonitoring = false, isLoudAlert = false)
+        _state.update { it.copy(isMonitoring = false, isLoudAlert = false) }
     }
 
     fun measureOnce(context: Context) {
@@ -146,32 +166,63 @@ object SomaNoiseMonitor {
     }
 
     private suspend fun sampleAndUpdate(ctx: Context, durationMs: Long, triggerAlerts: Boolean) {
-        _state.value = _state.value.copy(isSamplingNow = true)
+        _state.update { it.copy(isSamplingNow = true) }
         try {
             val db = measureSampleDb(durationMs) ?: return
-            val cur = _state.value
-            val isLoud = db >= cur.thresholdDb
-            _state.value = cur.copy(
-                currentDb = db,
-                peakDbToday = maxOf(cur.peakDbToday, db),
-                isLoudAlert = isLoud
-            )
+            val threshold = _state.value.thresholdDb
+            val isLoud = db >= threshold
+            SomaBiometricsStore.saveNoiseReading(ctx, db, System.currentTimeMillis())
+            _state.update { cur ->
+                cur.copy(
+                    currentDb = db,
+                    peakDbToday = maxOf(cur.peakDbToday, db),
+                    isLoudAlert = isLoud
+                )
+            }
+            requestComplicationUpdate(ctx, db = db)
 
             if (isLoud && triggerAlerts) {
                 val confirmDb = measureSampleDb(2500L) ?: db
-                if (confirmDb >= cur.thresholdDb) {
-                    _state.value = _state.value.copy(
-                        currentDb = confirmDb,
-                        peakDbToday = maxOf(_state.value.peakDbToday, confirmDb),
-                        isLoudAlert = true
-                    )
-                    maybeTriggerLoudAlert(ctx, confirmDb, cur.thresholdDb)
+                SomaBiometricsStore.saveNoiseReading(ctx, confirmDb, System.currentTimeMillis())
+                if (confirmDb >= threshold) {
+                    _state.update { cur ->
+                        cur.copy(
+                            currentDb = confirmDb,
+                            peakDbToday = maxOf(cur.peakDbToday, confirmDb),
+                            isLoudAlert = true
+                        )
+                    }
+                    requestComplicationUpdate(ctx, db = confirmDb, force = true)
+                    maybeTriggerLoudAlert(ctx, confirmDb, threshold)
                 } else {
-                    _state.value = _state.value.copy(currentDb = confirmDb, isLoudAlert = false)
+                    _state.update { cur ->
+                        cur.copy(
+                            currentDb = confirmDb,
+                            peakDbToday = maxOf(cur.peakDbToday, confirmDb),
+                            isLoudAlert = false
+                        )
+                    }
+                    requestComplicationUpdate(ctx, db = confirmDb)
                 }
             }
         } finally {
-            _state.value = _state.value.copy(isSamplingNow = false)
+            _state.update { it.copy(isSamplingNow = false) }
+        }
+    }
+
+    private fun requestComplicationUpdate(ctx: Context, db: Int = _state.value.currentDb, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && abs(db - lastComplicationDb) < 2 && now - lastComplicationPushMs < 15_000L) {
+            return
+        }
+        lastComplicationDb = db
+        lastComplicationPushMs = now
+        runCatching {
+            val requester = ComplicationDataSourceUpdateRequester.create(
+                ctx,
+                ComponentName(ctx, NoiseComplicationService::class.java)
+            )
+            requester.requestUpdateAll()
         }
     }
 
@@ -225,7 +276,7 @@ object SomaNoiseMonitor {
             }
 
             audioRecord.stop()
-            if (totalSamples == 0L) return null
+            if (totalSamples == 0L || sumSq <= 0.0) return null
 
             val rms = sqrt(sumSq / totalSamples).coerceAtLeast(1.0)
             val dbfs = 20.0 * log10(rms / 32767.0)

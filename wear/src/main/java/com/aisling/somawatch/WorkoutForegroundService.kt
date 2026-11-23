@@ -10,15 +10,19 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 
 class WorkoutForegroundService : Service() {
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        acquireCpuWakeLock()
         ensureChannel()
         val notification = buildOngoingNotification(hr = 0, zone = 0, elapsedSec = 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -27,6 +31,36 @@ class WorkoutForegroundService : Service() {
             startForeground(NOTIF_ID, notification)
         }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        releaseCpuWakeLock()
+        super.onDestroy()
+    }
+
+    private fun acquireCpuWakeLock() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val wl = wakeLock ?: pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "SomaWatch:WorkoutCpuWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                wakeLock = this
+            }
+            if (!wl.isHeld) {
+                wl.acquire(4 * 60 * 60 * 1000L) // 4h safety ceiling
+            }
+        }
+    }
+
+    private fun releaseCpuWakeLock() {
+        runCatching {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        }
+        wakeLock = null
     }
 
     private fun ensureChannel() {

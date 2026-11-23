@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.RangedValueComplicationData
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
@@ -29,6 +30,13 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
             )
                 .setTitle(PlainComplicationText.Builder("Z2").build())
+                .build()
+
+            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
+                text = PlainComplicationText.Builder("Zone 2: 95 / 150 мин").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
+            )
+                .setTitle(PlainComplicationText.Builder("HIIT: 32 / 75 мин").build())
                 .build()
 
             else -> null
@@ -67,6 +75,14 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min из $goal мин").build()
             )
                 .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setTapAction(tapAction)
+                .build()
+
+            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
+                text = PlainComplicationText.Builder("Zone 2: $z2Min / $goal мин").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min из $goal мин").build()
+            )
+                .setTitle(PlainComplicationText.Builder("HIIT: ${stats.vigorousMinutes} / ${stats.vigorousGoalMin} мин").build())
                 .setTapAction(tapAction)
                 .build()
 

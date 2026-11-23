@@ -280,8 +280,14 @@ fun SomaCompanionScreen() {
                         if (b.hrr2 >= 0) append("HRR-2: -${b.hrr2}  ")
                         if (b.hrvMs > 0) append("HRV: ${b.hrvMs}ms")
                     }
+                    val zonesText = buildString {
+                        append("Z2 ${formatMinSec(b.sessionZ2Sec)}")
+                        if (b.sessionZ3Sec > 0) append(" • Z3 ${formatMinSec(b.sessionZ3Sec)}")
+                        append(" • HIIT ${formatMinSec(b.sessionVigSec)}")
+                        if (b.sessionZ1Sec > 0) append(" • Z1 ${formatMinSec(b.sessionZ1Sec)}")
+                    }
                     Text(
-                        text = "Последняя сессия: ${b.durationSec / 60} мин • ср/пик ${b.avgHr}/${b.peakHr} BPM" +
+                        text = "Последняя сессия: ${formatMinSec(b.durationSec)} • ср/пик ${b.avgHr}/${b.peakHr} BPM\n$zonesText" +
                             if (hrrText.isNotBlank()) "\n$hrrText" else "",
                         color = CompanionColors.TextSecondary,
                         fontSize = 12.sp
@@ -944,5 +950,16 @@ private suspend fun pingWatch(context: Context) {
         SomaMobileState.recordWatchMessage("Пинг отправлен на ${nodes.first().displayName}")
     } catch (e: Exception) {
         SomaMobileState.recordWatchMessage("Ошибка пинга: ${e.localizedMessage}")
+    }
+}
+
+private fun formatMinSec(totalSec: Int): String {
+    if (totalSec <= 0) return "0м"
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return when {
+        m == 0 -> "${s}с"
+        s == 0 -> "${m}м"
+        else -> "${m}м ${s}с"
     }
 }
