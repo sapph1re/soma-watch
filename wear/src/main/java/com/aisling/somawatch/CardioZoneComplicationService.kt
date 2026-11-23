@@ -33,10 +33,10 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("Zone 2: 95 / 150 мин").build(),
+                text = PlainComplicationText.Builder("Zone 2: 95 / 150 min").build(),
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
             )
-                .setTitle(PlainComplicationText.Builder("HIIT: 32 / 75 мин").build())
+                .setTitle(PlainComplicationText.Builder("HIIT: 32 / 75 min").build())
                 .build()
 
             else -> null
@@ -63,7 +63,7 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 value = z2Min.toFloat().coerceAtMost(goal.toFloat()),
                 min = 0f,
                 max = goal.toFloat(),
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min из $goal мин").build()
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
                 .setText(PlainComplicationText.Builder("${z2Min}m").build())
                 .setTitle(PlainComplicationText.Builder("Z2").build())
@@ -72,17 +72,17 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
 
             ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
                 text = PlainComplicationText.Builder("$z2Min/$goal").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min из $goal мин").build()
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
                 .setTitle(PlainComplicationText.Builder("Z2").build())
                 .setTapAction(tapAction)
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("Zone 2: $z2Min / $goal мин").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min из $goal мин").build()
+                text = PlainComplicationText.Builder("Zone 2: $z2Min / $goal min").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
-                .setTitle(PlainComplicationText.Builder("HIIT: ${stats.vigorousMinutes} / ${stats.vigorousGoalMin} мин").build())
+                .setTitle(PlainComplicationText.Builder("HIIT: ${stats.vigorousMinutes} / ${stats.vigorousGoalMin} min").build())
                 .setTapAction(tapAction)
                 .build()
 

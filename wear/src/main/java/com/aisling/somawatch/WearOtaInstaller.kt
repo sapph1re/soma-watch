@@ -14,7 +14,7 @@ object WearOtaInstaller {
 
     fun installApk(context: Context, apkFile: File) {
         try {
-            SomaWearState.startOtaIndeterminate("Подготовка установки...")
+            SomaWearState.startOtaIndeterminate("Preparing install...")
             val packageInstaller = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
             val sessionId = packageInstaller.createSession(params)
@@ -39,7 +39,7 @@ object WearOtaInstaller {
             Log.i(TAG, "Committed PackageInstaller session $sessionId")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to install OTA APK", e)
-            SomaWearState.finishOtaMessage("Ошибка OTA: ${e.localizedMessage}")
+            SomaWearState.finishOtaMessage("OTA error: ${e.localizedMessage}")
         }
     }
 }
@@ -57,15 +57,15 @@ class OtaInstallReceiver : BroadcastReceiver() {
                 if (confirmIntent != null) {
                     confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(confirmIntent)
-                    SomaWearState.finishOtaMessage("Подтвердите установку")
+                    SomaWearState.finishOtaMessage("Confirm installation")
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> {
-                SomaWearState.finishOtaMessage("Soma Watch обновлён ✓")
+                SomaWearState.finishOtaMessage("Soma Watch updated ✓")
             }
             else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Status $status"
-                SomaWearState.finishOtaMessage("Ошибка: $msg")
+                SomaWearState.finishOtaMessage("Error: $msg")
             }
         }
     }

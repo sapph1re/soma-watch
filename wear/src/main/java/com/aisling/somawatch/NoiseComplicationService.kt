@@ -19,24 +19,24 @@ class NoiseComplicationService : SuspendingComplicationDataSourceService() {
                 value = 54f,
                 min = 30f,
                 max = 115f,
-                contentDescription = PlainComplicationText.Builder("Soma Шум дБ").build()
+                contentDescription = PlainComplicationText.Builder("Soma Noise dB").build()
             )
-                .setText(PlainComplicationText.Builder("54дБ").build())
-                .setTitle(PlainComplicationText.Builder("Шум").build())
+                .setText(PlainComplicationText.Builder("54dB").build())
+                .setTitle(PlainComplicationText.Builder("Noise").build())
                 .build()
 
             ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("54дБ").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Шум дБ").build()
+                text = PlainComplicationText.Builder("54dB").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Noise dB").build()
             )
-                .setTitle(PlainComplicationText.Builder("Шум").build())
+                .setTitle(PlainComplicationText.Builder("Noise").build())
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("54 дБ (порог 85)").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Шум дБ").build()
+                text = PlainComplicationText.Builder("54 dB (limit 85)").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Noise dB").build()
             )
-                .setTitle(PlainComplicationText.Builder("Шум • Пик 68 дБ").build())
+                .setTitle(PlainComplicationText.Builder("Noise • Peak 68 dB").build())
                 .build()
 
             else -> null
@@ -60,11 +60,11 @@ class NoiseComplicationService : SuspendingComplicationDataSourceService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val shortValue = if (db > 0) "${db}дБ" else "--"
+        val shortValue = if (db > 0) "${db}dB" else "--"
         val description = if (db > 0) {
-            "Шум: $db дБ, пик сегодня: $peak дБ, порог: $threshold дБ"
+            "Noise: $db dB, today peak: $peak dB, limit: $threshold dB"
         } else {
-            "Шум: нет замера"
+            "Noise: no reading"
         }
 
         return when (request.complicationType) {
@@ -75,7 +75,7 @@ class NoiseComplicationService : SuspendingComplicationDataSourceService() {
                 contentDescription = PlainComplicationText.Builder(description).build()
             )
                 .setText(PlainComplicationText.Builder(shortValue).build())
-                .setTitle(PlainComplicationText.Builder("Шум").build())
+                .setTitle(PlainComplicationText.Builder("Noise").build())
                 .setTapAction(tapAction)
                 .build()
 
@@ -83,19 +83,19 @@ class NoiseComplicationService : SuspendingComplicationDataSourceService() {
                 text = PlainComplicationText.Builder(shortValue).build(),
                 contentDescription = PlainComplicationText.Builder(description).build()
             )
-                .setTitle(PlainComplicationText.Builder("Шум").build())
+                .setTitle(PlainComplicationText.Builder("Noise").build())
                 .setTapAction(tapAction)
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
                 text = PlainComplicationText.Builder(
-                    if (db > 0) "$db дБ (порог $threshold)" else "Шум: нет замера"
+                    if (db > 0) "$db dB (limit $threshold)" else "Noise: no reading"
                 ).build(),
                 contentDescription = PlainComplicationText.Builder(description).build()
             )
                 .setTitle(
                     PlainComplicationText.Builder(
-                        if (peak > 0) "Шум • Пик $peak дБ" else "Soma Шум"
+                        if (peak > 0) "Noise • Peak $peak dB" else "Soma Noise"
                     ).build()
                 )
                 .setTapAction(tapAction)

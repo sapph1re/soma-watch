@@ -34,20 +34,20 @@ object GitHubJulesClient {
     ): Result<String> = withContext(Dispatchers.IO) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty()) {
-            return@withContext Result.failure(IllegalArgumentException("Пустой промпт"))
+            return@withContext Result.failure(IllegalArgumentException("Empty prompt"))
         }
 
         val token = getSavedToken(context)
         if (token.isEmpty()) {
-            val msg = "Задайте GitHub Token в Soma Companion на телефоне"
+            val msg = "Set GitHub Token in Soma Watch on phone"
             SomaMobileState.setJulesStatus(msg)
-            notifyWatch(context, replyToNodeId, "Нужен GitHub Token на телефоне")
+            notifyWatch(context, replyToNodeId, "GitHub Token needed on phone")
             return@withContext Result.failure(IllegalStateException(msg))
         }
 
         try {
             SomaMobileState.setBusy(true)
-            SomaMobileState.setJulesStatus("Создаём Issue с лейблом jules...")
+            SomaMobileState.setJulesStatus("Creating GitHub Issue...")
 
             val shortTitle = if (cleanPrompt.length > 68) {
                 cleanPrompt.take(65) + "..."
@@ -56,13 +56,13 @@ object GitHubJulesClient {
             }
 
             val issueBody = buildString {
-                appendLine("### Задача от пользователя ($source)")
+                appendLine("### User Task ($source)")
                 appendLine()
                 appendLine(cleanPrompt)
                 appendLine()
                 appendLine("---")
-                appendLine("- **Источник:** `$source` (Soma Watch v${BuildConfig.VERSION_NAME})")
-                appendLine("- **Инструкция для агента:** Прочитай `GEMINI.md`, реализуй фичу аккуратно и убедись, что `./gradlew :wear:assembleDebug :mobile:assembleDebug` проходит без ошибок. Не удаляй OTA-модуль и не меняй `applicationId`.")
+                appendLine("- **Source:** `$source` (Soma Watch v${BuildConfig.VERSION_NAME})")
+                appendLine("- **Agent Instructions:** Read `GEMINI.md`, implement the feature cleanly, and verify `./gradlew :wear:assembleRelease :mobile:assembleRelease` passes without errors. Do not remove the OTA module or change `applicationId`.")
             }
 
             val payload = JSONObject().apply {
@@ -93,22 +93,22 @@ object GitHubJulesClient {
             if (code !in 200..299) {
                 Log.e(TAG, "GitHub API error HTTP $code: $body")
                 val errMsg = "GitHub HTTP $code"
-                SomaMobileState.setJulesStatus("Ошибка создания Issue: $errMsg")
-                notifyWatch(context, replyToNodeId, "Ошибка: $errMsg")
+                SomaMobileState.setJulesStatus("Issue creation error: $errMsg")
+                notifyWatch(context, replyToNodeId, "Error: $errMsg")
                 return@withContext Result.failure(IllegalStateException(errMsg))
             }
 
             val json = JSONObject(body)
             val issueNumber = json.optInt("number", 0)
-            val successMsg = "Issue #$issueNumber создан → Jules!"
-            SomaMobileState.setJulesStatus("$successMsg («$shortTitle»)")
+            val successMsg = "Issue #$issueNumber created!"
+            SomaMobileState.setJulesStatus("$successMsg (\"$shortTitle\")")
             notifyWatch(context, replyToNodeId, successMsg)
             Result.success(successMsg)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create Jules issue", e)
-            val errMsg = e.localizedMessage ?: "Сетевая ошибка"
-            SomaMobileState.setJulesStatus("Ошибка: $errMsg")
-            notifyWatch(context, replyToNodeId, "Ошибка: $errMsg")
+            Log.e(TAG, "Failed to create agent issue", e)
+            val errMsg = e.localizedMessage ?: "Network error"
+            SomaMobileState.setJulesStatus("Error: $errMsg")
+            notifyWatch(context, replyToNodeId, "Error: $errMsg")
             Result.failure(e)
         } finally {
             SomaMobileState.setBusy(false)

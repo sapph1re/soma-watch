@@ -239,13 +239,13 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
             null
         ).use { c ->
             if (c.moveToFirst()) {
-                val dateStr = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(c.getLong(0)))
+                val dateStr = SimpleDateFormat("MMM dd", Locale.US).format(Date(c.getLong(0)))
                 val durMin = c.getInt(1)
                 val hrs = durMin / 60
                 val mins = durMin % 60
-                val hrPart = if (!c.isNull(2)) " • пульс ${c.getInt(2)}" else ""
+                val hrPart = if (!c.isNull(2)) " • HR ${c.getInt(2)}" else ""
                 val hrvPart = if (!c.isNull(3)) " • HRV ${c.getInt(3)}ms" else ""
-                latestSleep = "$dateStr: ${hrs}ч ${mins}м$hrPart$hrvPart"
+                latestSleep = "$dateStr: ${hrs}h ${mins}m$hrPart$hrvPart"
             }
         }
 

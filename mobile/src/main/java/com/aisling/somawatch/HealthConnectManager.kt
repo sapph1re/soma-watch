@@ -44,14 +44,14 @@ object HealthConnectManager {
 
     suspend fun syncLast30Days(context: Context): Result<String> = withContext(Dispatchers.IO) {
         if (!isAvailable(context)) {
-            return@withContext Result.failure(IllegalStateException("Health Connect не установлен на телефоне"))
+            return@withContext Result.failure(IllegalStateException("Health Connect is not installed on this phone"))
         }
 
         try {
             val client = HealthConnectClient.getOrCreate(context)
             val granted = client.permissionController.getGrantedPermissions()
             if (granted.none { it in REQUIRED_PERMISSIONS }) {
-                return@withContext Result.failure(IllegalStateException("Нужны разрешения Health Connect"))
+                return@withContext Result.failure(IllegalStateException("Health Connect permissions required"))
             }
 
             val now = Instant.now()
@@ -144,7 +144,7 @@ object HealthConnectManager {
             // Refresh export JSON file automatically for ADB/Claude Code pulling
             db.writeExportFile(context)
 
-            val msg = "Health Connect: ${sleepRecords.size} ночей сна, ${hrvRecords.size} замеров HRV (30д)"
+            val msg = "Health Connect: ${sleepRecords.size} sleep nights, ${hrvRecords.size} HRV samples (30d)"
             Log.i(TAG, msg)
             Result.success(msg)
         } catch (e: Exception) {

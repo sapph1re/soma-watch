@@ -3,6 +3,7 @@ package com.aisling.somawatch
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -53,6 +55,7 @@ import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,6 +78,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +108,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 private object SomaColors {
     val Background = Color(0xFF000000)
@@ -133,12 +138,12 @@ private fun zoneColor(zone: Int): Color = when (zone) {
 }
 
 private fun zoneLabel(zone: Int): String = when (zone) {
-    1 -> "Z1 • Разминка"
-    2 -> "Z2 • Аэробная"
-    3 -> "Z3 • Темп"
-    4 -> "Z4 • Порог"
+    1 -> "Z1 • Warm-up"
+    2 -> "Z2 • Aerobic"
+    3 -> "Z3 • Tempo"
+    4 -> "Z4 • Threshold"
     5 -> "Z5 • VO2 Max"
-    else -> "Измерение..."
+    else -> "Measuring..."
 }
 
 class WearMainActivity : ComponentActivity() {
@@ -148,14 +153,25 @@ class WearMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         SomaBiometricsEngine.init(this)
         SomaNoiseMonitor.init(this)
-        if (intent?.getBooleanExtra("just_updated", false) == true) {
-            SomaWearState.finishOtaMessage("Обновлено до v${BuildConfig.VERSION_NAME} ✓")
-            SomaWearState.setAvailableUpdate(null)
-        }
+        handleUpdateIntent(intent)
         setContent {
             MaterialTheme {
                 SomaRootScreen()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleUpdateIntent(intent)
+    }
+
+    private fun handleUpdateIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("just_updated", false) == true) {
+            SomaWearState.finishOtaMessage("Updated to v${BuildConfig.VERSION_NAME} ✓")
+            SomaWearState.setAvailableUpdate(null)
+            intent.removeExtra("just_updated")
         }
     }
 
@@ -260,7 +276,7 @@ fun SomaRootScreen() {
             }
         } else {
             pendingWorkoutStart = false
-            SomaWearState.updateStatus("Нужен доступ к пульсу")
+            SomaWearState.updateStatus("Heart rate permission needed")
         }
     }
 
@@ -271,12 +287,12 @@ fun SomaRootScreen() {
             if (voiceRecorder.startRecording()) {
                 triggerVibration(context, 70)
                 isRecording = true
-                SomaWearState.updateStatus("Слушаю...")
+                SomaWearState.updateStatus("Listening...")
             } else {
-                SomaWearState.updateStatus("Ошибка микрофона")
+                SomaWearState.updateStatus("Microphone error")
             }
         } else {
-            SomaWearState.updateStatus("Нет доступа к микрофону")
+            SomaWearState.updateStatus("Microphone permission needed")
         }
     }
 
@@ -333,14 +349,14 @@ fun SomaRootScreen() {
                         if (file != null) {
                             scope.launch { sendVoiceAudioToPhone(context, file) }
                         } else {
-                            SomaWearState.updateStatus("Слишком коротко")
+                            SomaWearState.updateStatus("Too short")
                         }
                     },
                     onCancel = {
                         isRecording = false
                         triggerVibration(context, 40)
                         voiceRecorder.stopAndDiscard()
-                        SomaWearState.updateStatus("Отменено")
+                        SomaWearState.updateStatus("Cancelled")
                     }
                 )
             }
@@ -357,7 +373,7 @@ fun SomaRootScreen() {
                     onCancel = {
                         triggerVibration(context, 40)
                         SomaWearState.setPendingVoicePrompt(null)
-                        SomaWearState.updateStatus("Отменено")
+                        SomaWearState.updateStatus("Cancelled")
                     }
                 )
             }
@@ -445,9 +461,9 @@ fun SomaRootScreen() {
                             if (voiceRecorder.startRecording()) {
                                 triggerVibration(context, 70)
                                 isRecording = true
-                                SomaWearState.updateStatus("Слушаю...")
+                                SomaWearState.updateStatus("Listening...")
                             } else {
-                                SomaWearState.updateStatus("Ошибка микрофона")
+                                SomaWearState.updateStatus("Microphone error")
                             }
                         } else {
                             micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -459,7 +475,7 @@ fun SomaRootScreen() {
                     },
                     onCheckOtaManual = {
                         triggerVibration(context, 40)
-                        SomaWearState.updateStatus("Проверка обновлений...")
+                        SomaWearState.updateStatus("Checking for updates...")
                         scope.launch { checkOtaVersionSilently(context) }
                     },
                     onPingPhone = {
@@ -507,7 +523,7 @@ private fun MainDashboardView(
             modifier = Modifier.fillMaxSize(),
             state = listState,
             autoCentering = AutoCenteringParams(itemIndex = 1),
-            contentPadding = PaddingValues(top = 34.dp, bottom = 36.dp, start = 12.dp, end = 12.dp),
+            contentPadding = PaddingValues(top = 34.dp, bottom = 44.dp, start = 12.dp, end = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -561,14 +577,14 @@ private fun MainDashboardView(
                         icon = {
                             Icon(
                                 imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = "Обновить",
+                                contentDescription = "Update OTA",
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                         },
                         label = {
                             Text(
-                                text = "Обновить OTA",
+                                text = "Update Available",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -585,7 +601,58 @@ private fun MainDashboardView(
                 }
             }
 
-            // 2. Live Biometrics Hero Card (HR + HRV + HRR)
+            // 1c. Dismissible OTA status / completion banner — ALSO AT THE TOP for visual consistency
+            otaState.bannerText?.let { banner ->
+                item {
+                    val isError = banner.contains("error", ignoreCase = true) ||
+                        banner.contains("not connected", ignoreCase = true) ||
+                        banner.contains("failed", ignoreCase = true)
+                    val accent = if (isError) SomaColors.Coral else SomaColors.Emerald
+                    val bg = if (isError) Color(0xFF2D1219) else SomaColors.EmeraldContainer
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(bg)
+                            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .clickable { onDismissBanner() }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isError) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = banner,
+                                color = SomaColors.TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Tap to dismiss",
+                                color = accent.copy(alpha = 0.85f),
+                                fontSize = 8.sp
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Dismiss",
+                            tint = SomaColors.TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // 2. Live Biometrics Hero Card (HR + Zone + HRV + HRR)
             item {
                 Column(
                     modifier = Modifier
@@ -595,7 +662,7 @@ private fun MainDashboardView(
                         .border(1.dp, SomaColors.Border, RoundedCornerShape(18.dp))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -603,16 +670,17 @@ private fun MainDashboardView(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Favorite,
-                            contentDescription = "Пульс",
+                            contentDescription = "Heart Rate",
                             tint = liveZoneColor,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (bio.currentHr > 0) "${bio.currentHr}" else "--",
                             color = SomaColors.TextPrimary,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            style = TextStyle(fontFeatureSettings = "tnum")
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
@@ -623,18 +691,44 @@ private fun MainDashboardView(
                         )
                     }
 
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (bio.currentHr > 0) liveZoneColor.copy(alpha = 0.14f)
+                                else SomaColors.SurfaceElevated
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (bio.currentHr > 0) zoneLabel(bio.currentZone) else "Wear snug • Measuring",
+                            color = if (bio.currentHr > 0) liveZoneColor else SomaColors.TextMuted,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(1.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         MetricMiniBadge(
                             label = if (bio.hrvSource == "HR~") "HRV~" else "HRV",
                             value = bio.currentHrvMs?.let { "${it}ms" } ?: if (bio.currentHr > 0) "…" else "--",
                             accent = SomaColors.Cyan
                         )
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(22.dp)
+                                .background(SomaColors.Border)
+                        )
                         MetricMiniBadge(
                             label = "HRR-1",
-                            value = bio.weekly.lastHrr1?.let { "-$it" } ?: "после бега",
+                            value = bio.weekly.lastHrr1?.let { "-$it bpm" } ?: "After run",
                             accent = SomaColors.Emerald
                         )
                     }
@@ -644,31 +738,48 @@ private fun MainDashboardView(
             // Auto-detected Dynamic/Strength Workout Prompt (if detected by HR + Linear Accel)
             bio.autoWorkoutSuggestion?.let { suggestion ->
                 item {
-                    Chip(
-                        onClick = onStartWorkout,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ChipDefaults.gradientBackgroundChipColors(
-                            startBackgroundColor = SomaColors.Orange,
-                            endBackgroundColor = SomaColors.Coral
-                        ),
-                        icon = {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                Brush.horizontalGradient(listOf(SomaColors.Orange, SomaColors.Coral))
                             )
-                        },
-                        label = {
-                            Text(
-                                text = suggestion,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2
+                            .clickable { onStartWorkout() }
+                            .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.DirectionsRun,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = suggestion,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.22f))
+                                .clickable { onDismissAutoWorkout() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Dismiss",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
                             )
                         }
-                    )
+                    }
                 }
             }
 
@@ -693,7 +804,7 @@ private fun MainDashboardView(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                contentDescription = "Бег",
+                                contentDescription = "Run",
                                 tint = Color.White,
                                 modifier = Modifier.size(19.dp)
                             )
@@ -701,7 +812,7 @@ private fun MainDashboardView(
                     },
                     label = {
                         Text(
-                            text = "Бег / Кардио",
+                            text = "Run / Cardio",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
@@ -710,7 +821,7 @@ private fun MainDashboardView(
                     },
                     secondaryLabel = {
                         Text(
-                            text = "Экран всегда активен",
+                            text = "Always-on display",
                             color = Color.White.copy(alpha = 0.82f),
                             fontSize = 10.sp,
                             maxLines = 1
@@ -719,7 +830,7 @@ private fun MainDashboardView(
                 )
             }
 
-            // 4. Weekly Cardio Budget (Bryan Johnson / Blueprint Zone 2 + Zone 4-5)
+            // 4. Weekly Cardio Budget (Zone 2 + Zone 4-5)
             item {
                 val w = bio.weekly
                 Column(
@@ -731,13 +842,25 @@ private fun MainDashboardView(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "КАРДИО ЗА НЕДЕЛЮ",
-                        color = SomaColors.TextMuted,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "WEEKLY CARDIO",
+                            color = SomaColors.TextMuted,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "Max ${w.maxHr}",
+                            color = SomaColors.TextMuted,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                     ZoneProgressRow(
                         label = "Zone 2",
                         minutes = w.zone2Minutes,
@@ -752,7 +875,7 @@ private fun MainDashboardView(
                     )
                     if (w.zone3Seconds > 0L) {
                         Text(
-                            text = "Zone 3 (темп): ${formatZoneDuration(w.zone3Seconds.toInt())}",
+                            text = "Zone 3 (Tempo): ${formatZoneDuration(w.zone3Seconds.toInt())}",
                             color = SomaColors.Amber.copy(alpha = 0.85f),
                             fontSize = 9.sp
                         )
@@ -760,7 +883,7 @@ private fun MainDashboardView(
                 }
             }
 
-            // 4b. Battery-Smart Duty-Cycled Decibel Meter Card
+            // 5. Battery-Smart Duty-Cycled Decibel Meter Card
             item {
                 val dbColor = when {
                     noise.currentDb >= noise.thresholdDb -> SomaColors.Coral
@@ -790,31 +913,37 @@ private fun MainDashboardView(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Rounded.GraphicEq,
-                                contentDescription = "Шум",
+                                contentDescription = "Sound Level",
                                 tint = dbColor,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = when {
-                                    noise.currentDb > 0 -> "${noise.currentDb} дБ"
-                                    noise.isSamplingNow -> "замер..."
-                                    else -> "тап • дБ"
+                                    noise.currentDb > 0 -> "${noise.currentDb} dB"
+                                    noise.isSamplingNow -> "Sampling..."
+                                    else -> "Tap • dB"
                                 },
                                 color = SomaColors.TextPrimary,
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.ExtraBold,
+                                style = TextStyle(fontFeatureSettings = "tnum")
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(if (noise.isMonitoring) SomaColors.EmeraldContainer else SomaColors.SurfaceElevated)
+                                .border(
+                                    1.dp,
+                                    if (noise.isMonitoring) SomaColors.Emerald.copy(alpha = 0.4f) else SomaColors.Border,
+                                    RoundedCornerShape(50)
+                                )
                                 .clickable { onToggleNoiseMonitor() }
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = if (noise.isMonitoring) "ФОН ВКЛ" else "АЛЕРТ >${noise.thresholdDb}",
+                                text = if (noise.isMonitoring) "AUTO ON" else "ALERT >${noise.thresholdDb}",
                                 color = if (noise.isMonitoring) SomaColors.Emerald else SomaColors.TextSecondary,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold
@@ -835,6 +964,21 @@ private fun MainDashboardView(
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(dbColor)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (noise.peakDbToday > 0) "Peak ${noise.peakDbToday} dB" else "Tap to sample",
+                            color = SomaColors.TextMuted,
+                            fontSize = 8.sp
+                        )
+                        Text(
+                            text = "Limit ${noise.thresholdDb} dB",
+                            color = SomaColors.TextMuted,
+                            fontSize = 8.sp
                         )
                     }
                 }
@@ -861,7 +1005,7 @@ private fun MainDashboardView(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Mic,
-                                contentDescription = "Диктовка",
+                                contentDescription = "Voice Dictation",
                                 tint = Color.White,
                                 modifier = Modifier.size(17.dp)
                             )
@@ -869,7 +1013,7 @@ private fun MainDashboardView(
                     },
                     label = {
                         Text(
-                            text = "Идея агенту",
+                            text = "Voice Idea",
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -877,7 +1021,7 @@ private fun MainDashboardView(
                     },
                     secondaryLabel = {
                         Text(
-                            text = "Голос • Gemini AI",
+                            text = "Gemini AI → Issue",
                             color = Color.White.copy(alpha = 0.78f),
                             fontSize = 10.sp
                         )
@@ -885,54 +1029,37 @@ private fun MainDashboardView(
                 )
             }
 
-            // Optional dismissible OTA completion banner
-            otaState.bannerText?.let { banner ->
-                item {
-                    Chip(
-                        onClick = onDismissBanner,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ChipDefaults.primaryChipColors(
-                            backgroundColor = SomaColors.EmeraldContainer
-                        ),
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = null,
-                                tint = SomaColors.Emerald,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = banner,
-                                color = SomaColors.TextPrimary,
-                                fontSize = 11.sp,
-                                maxLines = 2
-                            )
-                        }
-                    )
-                }
-            }
-
             // 7. Compact Phone Ping & Status Footer
             item {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(top = 2.dp)
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
                 ) {
-                    Button(
-                        onClick = onPingPhone,
-                        modifier = Modifier.size(44.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            backgroundColor = SomaColors.SurfaceElevated
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(SomaColors.SurfaceElevated)
+                            .border(1.dp, SomaColors.Border, RoundedCornerShape(50))
+                            .clickable { onPingPhone() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Smartphone,
-                            contentDescription = "Пинг телефона",
+                            contentDescription = "Ping Phone",
                             tint = SomaColors.Cyan,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Ping Phone",
+                            color = SomaColors.TextPrimary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                     Text(
@@ -967,22 +1094,34 @@ private fun MetricMiniBadge(label: String, value: String, accent: Color) {
         Text(
             text = value,
             color = accent,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.ExtraBold
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            style = TextStyle(fontFeatureSettings = "tnum")
         )
     }
 }
 
 @Composable
 private fun ZoneProgressRow(label: String, minutes: Int, goal: Int, color: Color) {
-    val fraction = (minutes.toFloat() / goal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    val targetFraction = (minutes.toFloat() / goal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    val animatedFraction by animateFloatAsState(
+        targetValue = targetFraction.coerceAtLeast(if (minutes > 0) 0.04f else 0f),
+        animationSpec = tween(350),
+        label = "zoneBar"
+    )
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(text = label, color = SomaColors.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = "$minutes / $goal м", color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "${minutes} / ${goal}m",
+                color = color,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                style = TextStyle(fontFeatureSettings = "tnum")
+            )
         }
         Box(
             modifier = Modifier
@@ -993,7 +1132,7 @@ private fun ZoneProgressRow(label: String, minutes: Int, goal: Int, color: Color
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(fraction.coerceAtLeast(if (minutes > 0) 0.04f else 0f))
+                    .fillMaxWidth(animatedFraction)
                     .height(5.dp)
                     .clip(RoundedCornerShape(50))
                     .background(color)
@@ -1041,7 +1180,7 @@ private fun ActiveWorkoutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1050,8 +1189,9 @@ private fun ActiveWorkoutScreen(
                 Text(
                     text = formatDuration(bio.elapsedSeconds),
                     color = SomaColors.TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 Text(
                     text = zoneLabel(bio.currentZone),
@@ -1073,11 +1213,12 @@ private fun ActiveWorkoutScreen(
                     Text(
                         text = if (bio.currentHr > 0) "${bio.currentHr}" else "--",
                         color = SomaColors.TextPrimary,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Black
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Black,
+                        style = TextStyle(fontFeatureSettings = "tnum")
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Column(modifier = Modifier.padding(bottom = 7.dp)) {
+                    Column(modifier = Modifier.padding(bottom = 6.dp)) {
                         Text(
                             text = "BPM",
                             color = activeZoneColor,
@@ -1088,12 +1229,13 @@ private fun ActiveWorkoutScreen(
                             text = bio.currentHrvMs?.let { "HRV ${it}ms" } ?: "HRV --",
                             color = SomaColors.Cyan,
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            style = TextStyle(fontFeatureSettings = "tnum")
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
 
                 // Live HR Sparkline Graph with shaded Zone 2 band
                 HeartRateSparkline(
@@ -1102,57 +1244,75 @@ private fun ActiveWorkoutScreen(
                     lineColor = activeZoneColor,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(38.dp)
+                        .height(34.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(SomaColors.Surface)
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
 
                 Text(
-                    text = "Z2 ${formatCompactMinSec(bio.sessionZone2Sec)}  •  HIIT ${formatCompactMinSec(bio.sessionVigorousSec)}  •  Пик ${bio.peakHr}",
+                    text = "Z2 ${formatCompactMinSec(bio.sessionZone2Sec)}  •  HIIT ${formatCompactMinSec(bio.sessionVigorousSec)}  •  Peak ${bio.peakHr}",
                     color = SomaColors.TextSecondary,
                     fontSize = 9.sp,
-                    maxLines = 1
+                    maxLines = 1,
+                    style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
                     Text(
                         text = "Z1 ${formatCompactMinSec(bio.sessionZone1Sec)}  •  Z3 ${formatCompactMinSec(bio.sessionZone3Sec)}",
                         color = SomaColors.TextMuted,
                         fontSize = 8.sp,
-                        maxLines = 1
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum")
                     )
                 }
             }
 
             // Bottom: HRR Cooldown + Stop Controls
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = onStartHrr,
-                    modifier = Modifier.size(44.dp),
-                    colors = ButtonDefaults.buttonColors(backgroundColor = SomaColors.EmeraldContainer)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SelfImprovement,
-                        contentDescription = "Заминка HRR",
-                        tint = SomaColors.Emerald,
-                        modifier = Modifier.size(21.dp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Button(
+                        onClick = onStartHrr,
+                        modifier = Modifier.size(40.dp),
+                        colors = ButtonDefaults.buttonColors(backgroundColor = SomaColors.EmeraldContainer)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SelfImprovement,
+                            contentDescription = "HRR Cooldown",
+                            tint = SomaColors.Emerald,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Text(
+                        text = "HRR",
+                        color = SomaColors.Emerald,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-                Button(
-                    onClick = onStopNow,
-                    modifier = Modifier.size(44.dp),
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3A121D))
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Stop,
-                        contentDescription = "Стоп",
-                        tint = SomaColors.Coral,
-                        modifier = Modifier.size(21.dp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Button(
+                        onClick = onStopNow,
+                        modifier = Modifier.size(40.dp),
+                        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3A121D))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Stop,
+                            contentDescription = "Stop",
+                            tint = SomaColors.Coral,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Text(
+                        text = "End",
+                        color = SomaColors.Coral,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -1243,7 +1403,7 @@ private fun HrrRecoveryScreen(
             modifier = Modifier.padding(horizontal = 20.dp)
         ) {
             Text(
-                text = "ЗАМИНКА • HRR",
+                text = "COOLDOWN • HRR",
                 color = SomaColors.Emerald,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -1253,13 +1413,15 @@ private fun HrrRecoveryScreen(
                 text = "-$liveDrop BPM",
                 color = SomaColors.TextPrimary,
                 fontSize = 28.sp,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.Black,
+                style = TextStyle(fontFeatureSettings = "tnum")
             )
             Text(
                 text = "${bio.recoveryStartHr} → ${bio.currentHr} BPM  •  ${formatDuration(bio.recoveryElapsedSec)} / 02:00",
                 color = SomaColors.TextSecondary,
                 fontSize = 10.sp,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                style = TextStyle(fontFeatureSettings = "tnum")
             )
             bio.hrr1Drop?.let { d1 ->
                 Text(
@@ -1277,7 +1439,7 @@ private fun HrrRecoveryScreen(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Check,
-                    contentDescription = "Завершить",
+                    contentDescription = "Finish",
                     tint = SomaColors.Emerald,
                     modifier = Modifier.size(20.dp)
                 )
@@ -1297,13 +1459,13 @@ private fun WorkoutSummaryScreen(
             .fillMaxSize()
             .background(SomaColors.Background),
         state = listState,
-        contentPadding = PaddingValues(top = 30.dp, bottom = 28.dp, start = 16.dp, end = 16.dp),
+        contentPadding = PaddingValues(top = 30.dp, bottom = 32.dp, start = 16.dp, end = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
             Text(
-                text = "ИТОГИ ТРЕНИРОВКИ",
+                text = "WORKOUT SUMMARY",
                 color = SomaColors.Emerald,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -1320,8 +1482,8 @@ private fun WorkoutSummaryScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text("Время: ${formatDuration(bio.elapsedSeconds)}", color = SomaColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text("Пульс ср/пик: ${bio.avgHr} / ${bio.peakHr} BPM", color = SomaColors.TextSecondary, fontSize = 11.sp)
+                Text("Duration: ${formatDuration(bio.elapsedSeconds)}", color = SomaColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Avg / Peak HR: ${bio.avgHr} / ${bio.peakHr} BPM", color = SomaColors.TextSecondary, fontSize = 11.sp)
                 Text("Zone 2: +${formatZoneDuration(bio.sessionZone2Sec)}  •  HIIT: +${formatZoneDuration(bio.sessionVigorousSec)}", color = SomaColors.Emerald, fontSize = 11.sp)
                 if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
                     Text(
@@ -1332,6 +1494,14 @@ private fun WorkoutSummaryScreen(
                         },
                         color = SomaColors.Amber,
                         fontSize = 10.sp
+                    )
+                }
+                bio.currentHrvMs?.let { hrv ->
+                    Text(
+                        text = "HRV: ${hrv}ms",
+                        color = SomaColors.Cyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
                 if (bio.hrr1Drop != null || bio.hrr2Drop != null) {
@@ -1352,7 +1522,7 @@ private fun WorkoutSummaryScreen(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Check,
-                    contentDescription = "Готово",
+                    contentDescription = "Done",
                     tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
@@ -1419,7 +1589,8 @@ private fun OtaProgressOverlay(otaState: OtaUiState) {
                     text = "${(animatedProgress * 100).toInt()}%",
                     color = SomaColors.TextPrimary,
                     fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontWeight = FontWeight.ExtraBold,
+                    style = TextStyle(fontFeatureSettings = "tnum")
                 )
             } else {
                 Text(
@@ -1432,7 +1603,7 @@ private fun OtaProgressOverlay(otaState: OtaUiState) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = otaState.bannerText ?: "Загрузка обновления...",
+                text = otaState.bannerText ?: "Downloading update...",
                 color = SomaColors.TextSecondary,
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
@@ -1505,10 +1676,11 @@ private fun VoiceRecordingView(
                 text = formatDuration(seconds),
                 color = SomaColors.TextPrimary,
                 fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold
+                fontWeight = FontWeight.ExtraBold,
+                style = TextStyle(fontFeatureSettings = "tnum")
             )
             Text(
-                text = "Диктуй задачу",
+                text = "Speak your idea",
                 color = SomaColors.TextSecondary,
                 fontSize = 11.sp
             )
@@ -1523,7 +1695,7 @@ private fun VoiceRecordingView(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
-                        contentDescription = "Отмена",
+                        contentDescription = "Cancel",
                         tint = SomaColors.Coral,
                         modifier = Modifier.size(22.dp)
                     )
@@ -1535,7 +1707,7 @@ private fun VoiceRecordingView(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Check,
-                        contentDescription = "Отправить в Gemini",
+                        contentDescription = "Send to Gemini",
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1571,7 +1743,7 @@ private fun VoiceConfirmView(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "GEMINI",
+                    text = "GEMINI AI",
                     color = SomaColors.IndigoSoft,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -1607,7 +1779,7 @@ private fun VoiceConfirmView(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
-                        contentDescription = "Отмена",
+                        contentDescription = "Cancel",
                         tint = SomaColors.Coral,
                         modifier = Modifier.size(20.dp)
                     )
@@ -1619,7 +1791,7 @@ private fun VoiceConfirmView(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.Send,
-                        contentDescription = "Создать Issue",
+                        contentDescription = "Create Issue",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
@@ -1633,23 +1805,23 @@ private fun formatDuration(totalSec: Int): String {
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
-    return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+    return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%02d:%02d", m, s)
 }
 
 private fun formatCompactMinSec(totalSec: Int): String {
     val m = totalSec / 60
     val s = totalSec % 60
-    return String.format("%d:%02d", m, s)
+    return String.format(Locale.US, "%d:%02d", m, s)
 }
 
 private fun formatZoneDuration(totalSec: Int): String {
-    if (totalSec <= 0) return "0 мин"
+    if (totalSec <= 0) return "0m"
     val m = totalSec / 60
     val s = totalSec % 60
     return when {
-        m == 0 -> "$s с"
-        s == 0 -> "$m мин"
-        else -> "$m м $s с"
+        m == 0 -> "${s}s"
+        s == 0 -> "${m}m"
+        else -> "${m}m ${s}s"
     }
 }
 
@@ -1686,11 +1858,11 @@ private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = w
     try {
         val nodes = Wearable.getNodeClient(context).connectedNodes.await()
         if (nodes.isEmpty()) {
-            SomaWearState.updateStatus("Телефон не найден")
+            SomaWearState.updateStatus("Phone not found")
             return@withContext
         }
         val sizeKb = audioFile.length() / 1024
-        SomaWearState.updateStatus("Аудио ($sizeKb КБ) → Gemini...")
+        SomaWearState.updateStatus("Audio ($sizeKb KB) → Gemini...")
         val targetNode = nodes.first()
         val channelClient = Wearable.getChannelClient(context)
         val channel = channelClient.openChannel(targetNode.id, "/soma/voice_audio").await()
@@ -1701,9 +1873,9 @@ private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = w
                 output.flush()
             }
         }
-        SomaWearState.updateStatus("Gemini расшифровывает...")
+        SomaWearState.updateStatus("Gemini transcribing...")
     } catch (e: Exception) {
-        SomaWearState.updateStatus("Ошибка аудио: ${e.localizedMessage}")
+        SomaWearState.updateStatus("Audio error: ${e.localizedMessage}")
     } finally {
         runCatching { audioFile.delete() }
     }
@@ -1713,17 +1885,17 @@ private suspend fun sendVoicePromptToPhone(context: Context, prompt: String) {
     try {
         val nodes = Wearable.getNodeClient(context).connectedNodes.await()
         if (nodes.isEmpty()) {
-            SomaWearState.updateStatus("Телефон не найден")
+            SomaWearState.updateStatus("Phone not found")
             return
         }
-        SomaWearState.updateStatus("Создаём задачу...")
+        SomaWearState.updateStatus("Creating issue...")
         nodes.forEach { node ->
             Wearable.getMessageClient(context)
                 .sendMessage(node.id, "/soma/voice_prompt", prompt.toByteArray(Charsets.UTF_8))
                 .await()
         }
     } catch (e: Exception) {
-        SomaWearState.updateStatus("Ошибка: ${e.localizedMessage}")
+        SomaWearState.updateStatus("Error: ${e.localizedMessage}")
     }
 }
 
@@ -1731,18 +1903,18 @@ private suspend fun sendPingToPhone(context: Context) {
     try {
         val nodes = Wearable.getNodeClient(context).connectedNodes.await()
         if (nodes.isEmpty()) {
-            SomaWearState.updateStatus("Телефон не найден")
+            SomaWearState.updateStatus("Phone not found")
             return
         }
-        val msg = "Пинг с Soma Watch v${BuildConfig.VERSION_NAME}"
+        val msg = "Ping from Soma Watch v${BuildConfig.VERSION_NAME}"
         nodes.forEach { node ->
             Wearable.getMessageClient(context)
                 .sendMessage(node.id, "/soma/ping", msg.toByteArray(Charsets.UTF_8))
                 .await()
         }
-        SomaWearState.updateStatus("Пинг → ${nodes.first().displayName}")
+        SomaWearState.updateStatus("Ping → ${nodes.first().displayName}")
     } catch (e: Exception) {
-        SomaWearState.updateStatus("Ошибка: ${e.localizedMessage}")
+        SomaWearState.updateStatus("Error: ${e.localizedMessage}")
     }
 }
 
@@ -1750,10 +1922,10 @@ private suspend fun requestOtaDownloadFromPhone(context: Context) {
     try {
         val nodes = Wearable.getNodeClient(context).connectedNodes.await()
         if (nodes.isEmpty()) {
-            SomaWearState.finishOtaMessage("Телефон не подключен")
+            SomaWearState.finishOtaMessage("Phone not connected")
             return
         }
-        SomaWearState.startOtaIndeterminate("Запрос обновления...")
+        SomaWearState.startOtaIndeterminate("Requesting update...")
         val versionCodeStr = BuildConfig.VERSION_CODE.toString()
         nodes.forEach { node ->
             Wearable.getMessageClient(context)
@@ -1761,6 +1933,6 @@ private suspend fun requestOtaDownloadFromPhone(context: Context) {
                 .await()
         }
     } catch (e: Exception) {
-        SomaWearState.finishOtaMessage("Ошибка: ${e.localizedMessage}")
+        SomaWearState.finishOtaMessage("Error: ${e.localizedMessage}")
     }
 }

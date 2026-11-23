@@ -67,10 +67,10 @@ class WorkoutForegroundService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Soma Тренировка",
+            "Soma Workout",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Активный трекинг пульса, HRV и зон кардио"
+            description = "Active heart rate, HRV, and cardio zone tracking"
         }
         nm.createNotificationChannel(channel)
     }
@@ -87,11 +87,11 @@ class WorkoutForegroundService : Service() {
         )
 
         val timeText = String.format("%02d:%02d", elapsedSec / 60, elapsedSec % 60)
-        val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Бег • $timeText"
+        val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Run • $timeText"
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentTitle("Soma Тренировка")
+            .setContentTitle("Soma Workout")
             .setContentText(statusLine)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
@@ -141,11 +141,11 @@ class WorkoutForegroundService : Service() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 val timeText = String.format("%02d:%02d", elapsedSec / 60, elapsedSec % 60)
-                val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Бег • $timeText"
+                val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Run • $timeText"
 
                 val builder = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.sym_def_app_icon)
-                    .setContentTitle("Soma Тренировка")
+                    .setContentTitle("Soma Workout")
                     .setContentText(statusLine)
                     .setOngoing(true)
                     .setCategory(NotificationCompat.CATEGORY_WORKOUT)

@@ -28,7 +28,7 @@ class MobileDataLayerService : WearableListenerService() {
                 Log.i(TAG, "WATCH_HR_RAW_PACKET: [$payload]")
             }
             "/soma/voice_prompt" -> {
-                SomaMobileState.recordWatchMessage("🎙️ С часов: «$payload»")
+                SomaMobileState.recordWatchMessage("🎙️ From watch: \"$payload\"")
                 scope.launch {
                     GitHubJulesClient.createJulesIssue(
                         context = this@MobileDataLayerService,
@@ -48,7 +48,7 @@ class MobileDataLayerService : WearableListenerService() {
                     SomaMobileState.setHealthDbStats(db.loadStats())
                     SomaMobileState.setLastBioSummary(summary)
                     SomaMobileState.recordWatchMessage(
-                        "Тренировка: ${summary.durationSec / 60}м • ср ${summary.avgHr} BPM • Z2 ${summary.weeklyZ2Min}/${summary.weeklyZ2Goal}м"
+                        "Workout: ${summary.durationSec / 60}m • Avg ${summary.avgHr} BPM • Z2 ${summary.weeklyZ2Min}/${summary.weeklyZ2Goal}m"
                     )
                 }
             }
@@ -77,7 +77,7 @@ class MobileDataLayerService : WearableListenerService() {
                     db.insertHrrEvent(j.optLong("timestamp", System.currentTimeMillis()), "passive", peak, hrr1, hrr2)
                     db.writeExportFile(this)
                     SomaMobileState.setHealthDbStats(db.loadStats())
-                    SomaMobileState.recordWatchMessage("Фоновый HRR (пик $peak): -${hrr1 ?: "?"} / -${hrr2 ?: "?"} BPM")
+                    SomaMobileState.recordWatchMessage("Passive HRR (peak $peak): -${hrr1 ?: "?"} / -${hrr2 ?: "?"} BPM")
                 }
             }
             "/soma/noise_event" -> {
@@ -89,7 +89,7 @@ class MobileDataLayerService : WearableListenerService() {
                     db.insertNoiseEvent(j.optLong("timestamp", System.currentTimeMillis()), dbVal, thr)
                     db.writeExportFile(this)
                     SomaMobileState.setHealthDbStats(db.loadStats())
-                    SomaMobileState.recordWatchMessage("Алерт шума: $dbVal дБ (порог $thr дБ)")
+                    SomaMobileState.recordWatchMessage("Noise alert: $dbVal dB (limit $thr dB)")
                 }
             }
             "/soma/check_ota_version" -> {
@@ -117,7 +117,7 @@ class MobileDataLayerService : WearableListenerService() {
                     return
                 }
                 val watchVersionCode = payload.trim().toIntOrNull() ?: 0
-                SomaMobileState.recordWatchMessage("Часы запросили обновление OTA (текущий #$watchVersionCode)")
+                SomaMobileState.recordWatchMessage("Watch requested OTA update (current #$watchVersionCode)")
                 scope.launch {
                     val release = GitHubOtaManager.checkLatestRelease()
                     if (release?.wearApkUrl != null) {
@@ -126,7 +126,7 @@ class MobileDataLayerService : WearableListenerService() {
                                 .sendMessage(
                                     messageEvent.sourceNodeId,
                                     "/soma/ota_status",
-                                    "DONE:Актуальная версия ✓".toByteArray(Charsets.UTF_8)
+                                    "DONE:Up to date ✓".toByteArray(Charsets.UTF_8)
                                 ).await()
                             Wearable.getMessageClient(this@MobileDataLayerService)
                                 .sendMessage(
@@ -142,7 +142,7 @@ class MobileDataLayerService : WearableListenerService() {
                             )
                         }
                     } else {
-                        val msg = "DONE:Релиз не найден в ${BuildConfig.GITHUB_REPO}"
+                        val msg = "DONE:Release not found in ${BuildConfig.GITHUB_REPO}"
                         Wearable.getMessageClient(this@MobileDataLayerService)
                             .sendMessage(
                                 messageEvent.sourceNodeId,
@@ -159,7 +159,7 @@ class MobileDataLayerService : WearableListenerService() {
         super.onChannelOpened(channel)
         if (channel.path == "/soma/voice_audio") {
             Log.i(TAG, "Receiving voice audio from watch for Gemini transcription...")
-            SomaMobileState.setJulesStatus("Приём аудио с Galaxy Watch 8...")
+            SomaMobileState.setJulesStatus("Receiving audio from Galaxy Watch 8...")
             scope.launch {
                 val audioFile = File(cacheDir, "wrist_voice_prompt.m4a")
                 try {
@@ -175,18 +175,18 @@ class MobileDataLayerService : WearableListenerService() {
                     }
 
                     val sizeKb = audioFile.length() / 1024
-                    SomaMobileState.setJulesStatus("Аудио ($sizeKb KB) → Gemini 2.5 Flash...")
+                    SomaMobileState.setJulesStatus("Audio ($sizeKb KB) → Gemini 2.5 Flash...")
                     val result = GeminiVoiceClient.transcribeAudio(this@MobileDataLayerService, audioFile)
 
                     val replyPayload = result.fold(
                         onSuccess = { text ->
-                            SomaMobileState.recordWatchMessage("Gemini: «$text»")
-                            SomaMobileState.setJulesStatus("Расшифровано → ждём подтверждения 🚀 на часах")
+                            SomaMobileState.recordWatchMessage("Gemini: \"$text\"")
+                            SomaMobileState.setJulesStatus("Transcribed → awaiting confirmation on watch")
                             text
                         },
                         onFailure = { err ->
-                            val msg = err.localizedMessage ?: "Ошибка Gemini"
-                            SomaMobileState.setJulesStatus("Ошибка Gemini: $msg")
+                            val msg = err.localizedMessage ?: "Gemini error"
+                            SomaMobileState.setJulesStatus("Gemini error: $msg")
                             "ERR:$msg"
                         }
                     )
@@ -199,7 +199,7 @@ class MobileDataLayerService : WearableListenerService() {
                         ).await()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed receiving/transcribing watch audio", e)
-                    SomaMobileState.setJulesStatus("Ошибка аудио: ${e.localizedMessage}")
+                    SomaMobileState.setJulesStatus("Audio error: ${e.localizedMessage}")
                     runCatching {
                         Wearable.getMessageClient(this@MobileDataLayerService)
                             .sendMessage(

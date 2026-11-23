@@ -45,10 +45,10 @@ class PackageReplacedReceiver : BroadcastReceiver() {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Обновления Soma Watch",
+                "Soma Watch Updates",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Мгновенное открытие Soma Watch после OTA-обновления"
+                description = "Opens Soma Watch immediately after an OTA update"
                 enableVibration(true)
             }
             nm.createNotificationChannel(channel)
@@ -62,8 +62,8 @@ class PackageReplacedReceiver : BroadcastReceiver() {
 
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.sym_def_app_icon)
-                .setContentTitle("Soma Watch обновлён!")
-                .setContentText("Версия v${BuildConfig.VERSION_NAME} — нажми, чтобы открыть")
+                .setContentTitle("Soma Watch Updated!")
+                .setContentText("Version v${BuildConfig.VERSION_NAME} — tap to open")
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(true)

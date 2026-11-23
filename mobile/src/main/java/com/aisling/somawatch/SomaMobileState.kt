@@ -16,16 +16,16 @@ data class GitHubReleaseInfo(
 )
 
 object SomaMobileState {
-    private val _connectedWatchName = MutableStateFlow("Поиск Galaxy Watch 8...")
+    private val _connectedWatchName = MutableStateFlow("Searching for Galaxy Watch 8...")
     val connectedWatchName: StateFlow<String> = _connectedWatchName
 
-    private val _lastWatchMessage = MutableStateFlow("Пока нет сообщений")
+    private val _lastWatchMessage = MutableStateFlow("No messages yet")
     val lastWatchMessage: StateFlow<String> = _lastWatchMessage
 
-    private val _julesStatus = MutableStateFlow("Готов отправлять задачи в GitHub Issues")
+    private val _julesStatus = MutableStateFlow("Ready to create GitHub Issues")
     val julesStatus: StateFlow<String> = _julesStatus
 
-    private val _otaStatus = MutableStateFlow("OTA готов (${BuildConfig.GITHUB_REPO})")
+    private val _otaStatus = MutableStateFlow("OTA ready (${BuildConfig.GITHUB_REPO})")
     val otaStatus: StateFlow<String> = _otaStatus
 
     private val _otaProgress = MutableStateFlow<Float?>(null)
@@ -40,7 +40,7 @@ object SomaMobileState {
     private val _healthDbStats = MutableStateFlow(HealthDbStats())
     val healthDbStats: StateFlow<HealthDbStats> = _healthDbStats
 
-    private val _healthConnectStatus = MutableStateFlow("Health Connect готов (сон + HRV из Samsung Health)")
+    private val _healthConnectStatus = MutableStateFlow("Health Connect ready (Sleep + HRV from Samsung Health)")
     val healthConnectStatus: StateFlow<String> = _healthConnectStatus
 
     private val _isBusy = MutableStateFlow(false)

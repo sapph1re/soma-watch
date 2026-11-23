@@ -31,7 +31,7 @@ object GitHubOtaManager {
             try {
                 SomaMobileState.setBusy(true)
                 SomaMobileState.setOtaProgress(null)
-                SomaMobileState.setOtaStatus("Проверяем GitHub Releases ($repo)...")
+                SomaMobileState.setOtaStatus("Checking GitHub Releases ($repo)...")
                 val url = URL("https://api.github.com/repos/$repo/releases/latest")
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -41,11 +41,11 @@ object GitHubOtaManager {
                 }
 
                 if (conn.responseCode == 404) {
-                    SomaMobileState.setOtaStatus("Релизов в $repo пока нет (404)")
+                    SomaMobileState.setOtaStatus("No releases found in $repo (404)")
                     return@withContext null
                 }
                 if (conn.responseCode !in 200..299) {
-                    SomaMobileState.setOtaStatus("Ошибка GitHub API: HTTP ${conn.responseCode}")
+                    SomaMobileState.setOtaStatus("GitHub API error: HTTP ${conn.responseCode}")
                     return@withContext null
                 }
 
@@ -81,7 +81,7 @@ object GitHubOtaManager {
                     mobileApkUrl = mobileUrl
                 )
                 SomaMobileState.setLatestRelease(info)
-                SomaMobileState.setOtaStatus("Найден релиз: $name")
+                SomaMobileState.setOtaStatus("Release found: $name")
                 if (notifyWatchContext != null && info.wearApkUrl != null && info.remoteVersionCode > 0) {
                     runCatching {
                         val payload = "${info.remoteVersionCode}|${info.tagName}"
@@ -96,7 +96,7 @@ object GitHubOtaManager {
                 info
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking GitHub releases", e)
-                SomaMobileState.setOtaStatus("Ошибка проверки OTA: ${e.localizedMessage}")
+                SomaMobileState.setOtaStatus("OTA check error: ${e.localizedMessage}")
                 null
             } finally {
                 SomaMobileState.setBusy(false)
@@ -114,8 +114,8 @@ object GitHubOtaManager {
         try {
             SomaMobileState.setBusy(true)
             SomaMobileState.setOtaProgress(0f)
-            SomaMobileState.setOtaStatus("Скачиваем wear APK из GitHub...")
-            notifyWatchStatus(context, "Скачивание с GitHub...")
+            SomaMobileState.setOtaStatus("Downloading wear APK from GitHub...")
+            notifyWatchStatus(context, "Downloading from GitHub...")
 
             val wearApkFile = File(context.cacheDir, "soma-wear-ota.apk")
             if (wearApkFile.exists()) wearApkFile.delete()
@@ -123,13 +123,13 @@ object GitHubOtaManager {
 
             val nodes = Wearable.getNodeClient(context).connectedNodes.await()
             if (nodes.isEmpty()) {
-                SomaMobileState.setOtaStatus("Часы Galaxy Watch 8 не найдены по Bluetooth!")
+                SomaMobileState.setOtaStatus("Galaxy Watch 8 not found over Bluetooth!")
                 return@withContext
             }
 
             val targetNode = nodes.first()
             val totalBytes = wearApkFile.length()
-            val sizeMb = String.format("%.1f", totalBytes / (1024.0 * 1024.0))
+            val sizeMb = String.format(java.util.Locale.US, "%.1f", totalBytes / (1024.0 * 1024.0))
 
             // Send exact file size & version label first so Watch 8 renders a real 0-100% progress ring!
             val metaPayload = "$totalBytes|$versionLabel"
@@ -137,7 +137,7 @@ object GitHubOtaManager {
                 .sendMessage(targetNode.id, "/soma/ota_meta", metaPayload.toByteArray(Charsets.UTF_8))
                 .await()
 
-            SomaMobileState.setOtaStatus("Отправка ($sizeMb МБ) на ${targetNode.displayName}...")
+            SomaMobileState.setOtaStatus("Sending ($sizeMb MB) to ${targetNode.displayName}...")
 
             val channelClient = Wearable.getChannelClient(context)
             val channel = channelClient.openChannel(targetNode.id, "/soma/ota_apk").await()
@@ -160,11 +160,11 @@ object GitHubOtaManager {
             }
 
             SomaMobileState.setOtaProgress(1f)
-            SomaMobileState.setOtaStatus("APK ($sizeMb МБ) передан на ${targetNode.displayName}! Подтвердите установку на часах.")
+            SomaMobileState.setOtaStatus("APK ($sizeMb MB) sent to ${targetNode.displayName}! Confirm install on watch.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push Wear OTA", e)
-            SomaMobileState.setOtaStatus("Ошибка отправки на часы: ${e.localizedMessage}")
-            notifyWatchStatus(context, "DONE:Ошибка отправки: ${e.localizedMessage}")
+            SomaMobileState.setOtaStatus("Watch transfer error: ${e.localizedMessage}")
+            notifyWatchStatus(context, "DONE:Transfer error: ${e.localizedMessage}")
         } finally {
             SomaMobileState.setBusy(false)
             SomaMobileState.setOtaProgress(null)
@@ -176,12 +176,12 @@ object GitHubOtaManager {
         try {
             SomaMobileState.setBusy(true)
             SomaMobileState.setOtaProgress(null)
-            SomaMobileState.setOtaStatus("Скачиваем mobile APK из GitHub...")
+            SomaMobileState.setOtaStatus("Downloading mobile APK from GitHub...")
             val mobileApkFile = File(context.cacheDir, "soma-mobile-ota.apk")
             if (mobileApkFile.exists()) mobileApkFile.delete()
             downloadFile(mobileApkUrl, mobileApkFile)
 
-            SomaMobileState.setOtaStatus("Запуск установщика на телефоне...")
+            SomaMobileState.setOtaStatus("Launching phone installer...")
             val apkUri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
@@ -194,7 +194,7 @@ object GitHubOtaManager {
             context.startActivity(installIntent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to install Mobile OTA", e)
-            SomaMobileState.setOtaStatus("Ошибка обновления телефона: ${e.localizedMessage}")
+            SomaMobileState.setOtaStatus("Phone update error: ${e.localizedMessage}")
         } finally {
             SomaMobileState.setBusy(false)
             SomaMobileState.setOtaProgress(null)

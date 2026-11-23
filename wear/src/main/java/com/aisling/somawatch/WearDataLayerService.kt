@@ -31,10 +31,10 @@ class WearDataLayerService : WearableListenerService() {
         when (messageEvent.path) {
             "/soma/ping" -> {
                 vibrate(100)
-                SomaWearState.recordPing(payload.ifEmpty { "Телефон" })
+                SomaWearState.recordPing(payload.ifEmpty { "Phone" })
                 scope.launch {
                     runCatching {
-                        val reply = "Soma Watch v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) на связи!"
+                        val reply = "Soma Watch v${BuildConfig.VERSION_NAME} (#${BuildConfig.VERSION_CODE}) online!"
                         Wearable.getMessageClient(this@WearDataLayerService)
                             .sendMessage(
                                 messageEvent.sourceNodeId,
@@ -72,7 +72,7 @@ class WearDataLayerService : WearableListenerService() {
                 val version = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
                 expectedOtaBytes.set(bytes)
                 SomaWearState.startOtaIndeterminate(
-                    message = "Приём обновления...",
+                    message = "Receiving update...",
                     totalBytes = bytes,
                     versionLabel = version
                 )
@@ -90,7 +90,7 @@ class WearDataLayerService : WearableListenerService() {
                 SomaBiometricsStore.setAutoDetectEnabled(this, autoDetect)
                 SomaBiometricsEngine.refreshWeeklyFromStore(this)
                 vibrate(80)
-                SomaWearState.updateStatus("Цели: Z2 ${z2}м • Шум >${noiseDb}дБ")
+                SomaWearState.updateStatus("Goals: Z2 ${z2}m • Noise >${noiseDb}dB")
             }
             "/soma/jules_result" -> {
                 vibrate(140)
@@ -101,7 +101,7 @@ class WearDataLayerService : WearableListenerService() {
                 if (payload.startsWith("ERR:")) {
                     SomaWearState.updateStatus(payload.removePrefix("ERR:").trim())
                 } else {
-                    SomaWearState.updateStatus("Gemini расшифровал")
+                    SomaWearState.updateStatus("Gemini transcribed")
                     SomaWearState.setPendingVoicePrompt(payload)
                 }
             }
@@ -157,7 +157,7 @@ class WearDataLayerService : WearableListenerService() {
                     WearOtaInstaller.installApk(this@WearDataLayerService, otaFile)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed receiving OTA APK over channel", e)
-                    SomaWearState.finishOtaMessage("Ошибка OTA: ${e.localizedMessage}")
+                    SomaWearState.finishOtaMessage("OTA error: ${e.localizedMessage}")
                 } finally {
                     isReceivingOta.set(false)
                     if (wakeLock.isHeld) wakeLock.release()

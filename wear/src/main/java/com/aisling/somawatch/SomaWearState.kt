@@ -21,10 +21,10 @@ data class OtaUiState(
 )
 
 object SomaWearState {
-    private val _statusMessage = MutableStateFlow("На связи")
+    private val _statusMessage = MutableStateFlow("Ready")
     val statusMessage: StateFlow<String> = _statusMessage
 
-    private val _lastSyncInfo = MutableStateFlow("Скажи идею — соберём OTA")
+    private val _lastSyncInfo = MutableStateFlow("Tap Voice Idea to build OTA")
     val lastSyncInfo: StateFlow<String> = _lastSyncInfo
 
     private val _otaState = MutableStateFlow(OtaUiState())
@@ -43,7 +43,7 @@ object SomaWearState {
     fun recordPing(from: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         _lastSyncInfo.value = "$from • $time"
-        _statusMessage.value = "Пинг получен"
+        _statusMessage.value = "Ping received"
     }
 
     fun recordAgentResult(result: String) {
@@ -54,6 +54,9 @@ object SomaWearState {
 
     fun setAvailableUpdate(update: AvailableOta?) {
         _availableUpdate.value = update
+        if (update != null && _otaState.value.bannerText != null && !_otaState.value.isActive) {
+            _otaState.value = _otaState.value.copy(bannerText = null)
+        }
     }
 
     fun startOtaIndeterminate(message: String, totalBytes: Long = 0L, versionLabel: String? = null) {
@@ -78,9 +81,9 @@ object SomaWearState {
         val mbDone = receivedBytes / (1024.0 * 1024.0)
         val label = if (effectiveTotal > 0L) {
             val mbTotal = effectiveTotal / (1024.0 * 1024.0)
-            String.format("%.1f / %.1f МБ", mbDone, mbTotal)
+            String.format(Locale.US, "%.1f / %.1f MB", mbDone, mbTotal)
         } else {
-            String.format("%.1f МБ", mbDone)
+            String.format(Locale.US, "%.1f MB", mbDone)
         }
         _otaState.value = current.copy(
             isActive = true,

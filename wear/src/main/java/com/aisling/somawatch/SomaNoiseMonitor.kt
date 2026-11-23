@@ -311,14 +311,14 @@ object SomaNoiseMonitor {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val ch = NotificationChannel(
                 CHANNEL_ID,
-                "Алерт громкости Soma",
+                "Soma Sound Alerts",
                 NotificationManager.IMPORTANCE_HIGH
             )
             nm.createNotificationChannel(ch)
             val notif = NotificationCompat.Builder(ctx, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.sym_def_app_icon)
-                .setContentTitle("Громко: $db дБ")
-                .setContentText("Порог $thresholdDb дБ превышен — надень беруши?")
+                .setContentTitle("Loud: $db dB")
+                .setContentText("Limit $thresholdDb dB exceeded — wear earplugs?")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .build()

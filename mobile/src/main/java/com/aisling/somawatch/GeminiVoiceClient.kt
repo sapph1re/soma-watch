@@ -32,7 +32,7 @@ object GeminiVoiceClient {
             val apiKey = getSavedApiKey(context)
             if (apiKey.isEmpty()) {
                 return@withContext Result.failure(
-                    IllegalStateException("Задайте Gemini API Key в Soma Watch на телефоне")
+                    IllegalStateException("Set Gemini API Key in Soma Watch on phone")
                 )
             }
 
@@ -41,11 +41,11 @@ object GeminiVoiceClient {
                 val base64Audio = Base64.encodeToString(audioBytes, Base64.NO_WRAP)
 
                 val promptText = """
-                    Расшифруй эту голосовую заметку пользователя на русском языке максимально точно.
-                    Пользователь диктует задачу на доработку приложения для умных часов Soma Watch (Wear OS / Android).
-                    Аккуратно сохраняй английские технические термины и аббревиатуры (HRV, BPM, HRR, Zone 2, Wear OS, OTA, Jules, Gemini, UI, GitHub, децибелы и т.д.).
-                    Убери слова-паразиты, но полностью сохрани смысл и детали.
-                    Верни ТОЛЬКО чистый текст задачи, без кавычек, заголовков и лишних комментариев.
+                    Transcribe this user voice note accurately in the exact language spoken (e.g., Russian or English).
+                    The user is dictating a feature or UI/UX task for the Soma Watch smartwatch app (Wear OS / Android).
+                    Preserve technical terms and acronyms accurately (HRV, BPM, HRR, Zone 2, Wear OS, OTA, UI, GitHub, decibels, etc.).
+                    Remove filler words while fully preserving meaning and details.
+                    Return ONLY the clean task text, without quotes, headings, or extra commentary.
                 """.trimIndent()
 
                 val inlineData = JSONObject().apply {
@@ -94,7 +94,7 @@ object GeminiVoiceClient {
                     .orEmpty()
 
                 if (text.isEmpty()) {
-                    return@withContext Result.failure(IllegalStateException("Gemini вернул пустой ответ"))
+                    return@withContext Result.failure(IllegalStateException("Gemini returned an empty response"))
                 }
 
                 Log.i(TAG, "Gemini transcribed: $text")

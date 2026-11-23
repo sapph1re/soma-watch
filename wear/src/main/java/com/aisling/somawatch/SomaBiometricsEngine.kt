@@ -185,7 +185,7 @@ object SomaBiometricsEngine : SensorEventListener {
                         lastAutoSuggestMs = now
                         vibrate(ctx, 110)
                         _state.update {
-                            it.copy(autoWorkoutSuggestion = "Нагрузка ($hr BPM) — записать?")
+                            it.copy(autoWorkoutSuggestion = "Effort ($hr BPM) — Record?")
                         }
                     }
                 } else {
