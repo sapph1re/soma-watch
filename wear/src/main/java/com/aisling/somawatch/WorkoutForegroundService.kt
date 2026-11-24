@@ -22,11 +22,16 @@ class WorkoutForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val autoStarted = intent?.getBooleanExtra(EXTRA_AUTO_STARTED, false) ?: false
         acquireCpuWakeLock()
         ensureChannel()
-        val notification = buildOngoingNotification(hr = 0, zone = 0, elapsedSec = 0)
+        val notification = buildOngoingNotification(hr = 0, zone = 0, elapsedSec = 0, autoStarted = autoStarted)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+            var fgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+            if (SomaMonitorService.hasMicPermission(this)) {
+                fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIF_ID, notification, fgsType)
         } else {
             startForeground(NOTIF_ID, notification)
         }
@@ -75,7 +80,7 @@ class WorkoutForegroundService : Service() {
         nm.createNotificationChannel(channel)
     }
 
-    private fun buildOngoingNotification(hr: Int, zone: Int, elapsedSec: Int): Notification {
+    private fun buildOngoingNotification(hr: Int, zone: Int, elapsedSec: Int, autoStarted: Boolean = false): Notification {
         val tapIntent = Intent(this, WearMainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -87,11 +92,12 @@ class WorkoutForegroundService : Service() {
         )
 
         val timeText = String.format("%02d:%02d", elapsedSec / 60, elapsedSec % 60)
-        val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Run • $timeText"
+        val prefix = if (autoStarted) "Auto Cardio" else "Soma Run"
+        val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "$prefix • $timeText"
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentTitle("Soma Workout")
+            .setContentTitle(if (autoStarted) "Soma Auto Cardio" else "Soma Workout")
             .setContentText(statusLine)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
@@ -114,9 +120,12 @@ class WorkoutForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "soma_workout_channel"
         private const val NOTIF_ID = 7007
+        private const val EXTRA_AUTO_STARTED = "auto_started"
 
-        fun start(context: Context) {
-            val intent = Intent(context, WorkoutForegroundService::class.java)
+        fun start(context: Context, autoStarted: Boolean = false) {
+            val intent = Intent(context, WorkoutForegroundService::class.java).apply {
+                putExtra(EXTRA_AUTO_STARTED, autoStarted)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -128,7 +137,7 @@ class WorkoutForegroundService : Service() {
             context.stopService(Intent(context, WorkoutForegroundService::class.java))
         }
 
-        fun updateNotification(context: Context, hr: Int, zone: Int, elapsedSec: Int) {
+        fun updateNotification(context: Context, hr: Int, zone: Int, elapsedSec: Int, autoStarted: Boolean = false) {
             runCatching {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 val tapIntent = Intent(context, WearMainActivity::class.java).apply {
@@ -141,11 +150,12 @@ class WorkoutForegroundService : Service() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 val timeText = String.format("%02d:%02d", elapsedSec / 60, elapsedSec % 60)
-                val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "Soma Run • $timeText"
+                val prefix = if (autoStarted) "Auto Cardio" else "Soma Run"
+                val statusLine = if (hr > 0) "♥ $hr • Z$zone • $timeText" else "$prefix • $timeText"
 
                 val builder = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.sym_def_app_icon)
-                    .setContentTitle("Soma Workout")
+                    .setContentTitle(if (autoStarted) "Soma Auto Cardio" else "Soma Workout")
                     .setContentText(statusLine)
                     .setOngoing(true)
                     .setCategory(NotificationCompat.CATEGORY_WORKOUT)

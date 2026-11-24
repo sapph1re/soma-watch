@@ -61,8 +61,10 @@ data class BiometricsUiState(
     // Continuous Recovery Kinetics (Imai T30 / intra-workout bouts)
     val latestBout: RecoveryBout? = null,
     val sessionRecoveryBouts: List<RecoveryBout> = emptyList(),
-    // Auto-detected dynamic/strength workout prompt
+    // Auto-detected dynamic/strength workout prompt & state
     val autoWorkoutSuggestion: String? = null,
+    val autoDetectEnabled: Boolean = true,
+    val wasAutoStarted: Boolean = false,
     val isMovingActively: Boolean = false,
     // Weekly persistent budget
     val weekly: WeeklyCardioStats = WeeklyCardioStats(
@@ -113,7 +115,10 @@ object SomaBiometricsEngine : SensorEventListener {
 
     // Auto-workout detection & passive HRR tracking
     private var rollingAccelMag = 0.0
+    @Volatile
+    private var lastSignificantMoveElapsedMs = 0L
     private var activeEffortSeconds = 0
+    private var autoIdleSeconds = 0
     private var lastAutoSuggestMs = 0L
     private var passivePeakHr = 0
     private var passiveHighHrSec = 0
@@ -128,13 +133,25 @@ object SomaBiometricsEngine : SensorEventListener {
         lastAutoSuggestMs = System.currentTimeMillis()
     }
 
+    fun setAutoDetectEnabled(context: Context, enabled: Boolean) {
+        val ctx = context.applicationContext
+        SomaBiometricsStore.setAutoDetectEnabled(ctx, enabled)
+        _state.update { it.copy(autoDetectEnabled = enabled) }
+        if (!enabled) {
+            activeEffortSeconds = 0
+            _state.update { it.copy(autoWorkoutSuggestion = null) }
+        }
+    }
+
     fun init(context: Context) {
         val ctx = context.applicationContext
         appContext = ctx
         val weekly = SomaBiometricsStore.load(ctx)
+        val autoDetect = SomaBiometricsStore.isAutoDetectEnabled(ctx)
         _state.update {
             it.copy(
                 weekly = weekly,
+                autoDetectEnabled = autoDetect,
                 currentHrvMs = it.currentHrvMs ?: weekly.lastHrvMs
             )
         }
@@ -150,7 +167,11 @@ object SomaBiometricsEngine : SensorEventListener {
     }
 
     fun stopPassiveMonitoringIfIdle() {
-        if (_state.value.phase == WorkoutPhase.IDLE && !SomaNoiseMonitor.state.value.isMonitoring) {
+        val keepAlive = _state.value.phase != WorkoutPhase.IDLE ||
+            SomaMonitorService.isRunning ||
+            SomaNoiseMonitor.state.value.isMonitoring ||
+            appContext?.let { SomaBiometricsStore.isAutoDetectEnabled(it) } == true
+        if (!keepAlive) {
             passiveJob?.cancel()
             passiveJob = null
             unregisterSensors()
@@ -164,6 +185,19 @@ object SomaBiometricsEngine : SensorEventListener {
                 delay(2000L)
                 val s = _state.value
                 val now = System.currentTimeMillis()
+                val nowElapsed = SystemClock.elapsedRealtime()
+
+                // Watchdog: if HR sensor stalled in background while active, re-register
+                if (s.phase == WorkoutPhase.IDLE &&
+                    s.isSensorActive &&
+                    lastHrEventElapsedMs > 0L &&
+                    nowElapsed - lastHrEventElapsedMs > 30_000L &&
+                    nowElapsed - lastSensorReregisterMs >= 30_000L
+                ) {
+                    lastSensorReregisterMs = nowElapsed
+                    Log.w(TAG, "No passive HR event for >30s; re-registering sensors")
+                    registerSensors(ctx)
+                }
 
                 // Periodic telemetry sync to OnePlus 15 SQLite DB (every 3 minutes when HR/HRV present)
                 if (s.currentHr > 35 && now - lastTelemetrySyncMs >= 180_000L) {
@@ -205,24 +239,29 @@ object SomaBiometricsEngine : SensorEventListener {
                 }
 
                 val hr = s.currentHr
-                val moving = rollingAccelMag > 1.35 // catches push-ups, squats, kettlebells even with 0 steps
-                if (s.isMovingActively != moving) {
-                    _state.update { it.copy(isMovingActively = moving) }
+                val movingRecently = (lastSignificantMoveElapsedMs > 0L && nowElapsed - lastSignificantMoveElapsedMs <= 18_000L) ||
+                    rollingAccelMag > 0.55
+                if (s.isMovingActively != movingRecently) {
+                    _state.update { it.copy(isMovingActively = movingRecently) }
                 }
 
-                // 1) Auto-detect dynamic/strength workout: HR >= 58% maxHr AND active acceleration for >= 40s
+                // 1) Auto-Cardio detection: sustained Zone 2+ effort (>=58% maxHr with movement, or >=64% with recent motion)
                 val effortThreshold = (s.weekly.maxHr * 0.58f).roundToInt()
-                if (SomaBiometricsStore.isAutoDetectEnabled(ctx) && hr >= effortThreshold && moving) {
+                val clearZone2Hr = (s.weekly.maxHr * 0.63f).roundToInt()
+                val recentLightMotion = lastSignificantMoveElapsedMs > 0L && nowElapsed - lastSignificantMoveElapsedMs <= 45_000L
+                val isCardioEffort = (hr >= effortThreshold && movingRecently) || (hr >= clearZone2Hr && recentLightMotion)
+
+                if (SomaBiometricsStore.isAutoDetectEnabled(ctx) && isCardioEffort) {
                     activeEffortSeconds += 2
-                    if (activeEffortSeconds >= 40 && s.autoWorkoutSuggestion == null && now - lastAutoSuggestMs > 10 * 60 * 1000L) {
+                    if (activeEffortSeconds >= 36 && now - lastAutoSuggestMs > 10 * 60 * 1000L) {
+                        activeEffortSeconds = 0
                         lastAutoSuggestMs = now
-                        vibrate(ctx, 110)
-                        _state.update {
-                            it.copy(autoWorkoutSuggestion = "Effort ($hr BPM) — Record?")
-                        }
+                        Log.i(TAG, "Auto-Cardio triggered at $hr BPM (Zone ${computeZone(hr, s.weekly.maxHr)})")
+                        vibrateDouble(ctx)
+                        startWorkout(ctx, autoStarted = true)
                     }
                 } else {
-                    activeEffortSeconds = (activeEffortSeconds - 2).coerceAtLeast(0)
+                    activeEffortSeconds = (activeEffortSeconds - 1).coerceAtLeast(0)
                 }
 
                 // 2) Passive background HRR-1 / HRR-2 after spontaneous exertion (HR >= 110 BPM for >= 24s)
@@ -230,7 +269,7 @@ object SomaBiometricsEngine : SensorEventListener {
                     if (hr >= 110) {
                         passiveHighHrSec += 2
                         passivePeakHr = maxOf(passivePeakHr, hr)
-                    } else if (passiveHighHrSec >= 24 && !moving && hr in 40 until passivePeakHr) {
+                    } else if (passiveHighHrSec >= 24 && !movingRecently && hr in 40 until passivePeakHr) {
                         // Exertion ended -> passively measure HRR-1 (60s) and HRR-2 (120s)!
                         passiveRecoveryActive = true
                         passiveRecoverySec = 0
@@ -261,13 +300,14 @@ object SomaBiometricsEngine : SensorEventListener {
         }
     }
 
-    fun startWorkout(context: Context) {
+    fun startWorkout(context: Context, autoStarted: Boolean = false) {
         val ctx = context.applicationContext
         init(ctx)
         registerSensors(ctx)
 
         lastHrSum = 0L
         lastHrCount = 0L
+        autoIdleSeconds = 0
         ibiWindowMs.clear()
         continuousHrrTracker.reset()
 
@@ -275,6 +315,8 @@ object SomaBiometricsEngine : SensorEventListener {
             val initialHr = cur.currentHr
             cur.copy(
                 phase = WorkoutPhase.ACTIVE,
+                wasAutoStarted = autoStarted,
+                autoWorkoutSuggestion = null,
                 elapsedSeconds = 0,
                 peakHr = initialHr,
                 avgHr = initialHr,
@@ -291,7 +333,9 @@ object SomaBiometricsEngine : SensorEventListener {
             )
         }
 
-        WorkoutForegroundService.start(ctx)
+        WorkoutForegroundService.start(ctx, autoStarted = autoStarted)
+        SomaMonitorService.stop(ctx)
+        requestComplicationUpdate(ctx)
         startTicker(ctx)
     }
 
@@ -314,6 +358,11 @@ object SomaBiometricsEngine : SensorEventListener {
         val ctx = context.applicationContext
         tickerJob?.cancel()
         tickerJob = null
+        lastAutoSuggestMs = System.currentTimeMillis()
+        autoIdleSeconds = 0
+
+        // Hand off back to lightweight SomaMonitorService while WorkoutForegroundService is still foreground
+        SomaMonitorService.start(ctx)
         WorkoutForegroundService.stop(ctx)
 
         val snapshotBeforeSave = _state.value
@@ -332,13 +381,14 @@ object SomaBiometricsEngine : SensorEventListener {
     }
 
     fun dismissSummary() {
-        _state.update { it.copy(phase = WorkoutPhase.IDLE) }
+        _state.update { it.copy(phase = WorkoutPhase.IDLE, wasAutoStarted = false) }
     }
 
     fun refreshWeeklyFromStore(context: Context) {
         val ctx = context.applicationContext
         val weekly = SomaBiometricsStore.load(ctx)
-        _state.update { it.copy(weekly = weekly) }
+        val autoDetect = SomaBiometricsStore.isAutoDetectEnabled(ctx)
+        _state.update { it.copy(weekly = weekly, autoDetectEnabled = autoDetect) }
         requestComplicationUpdate(ctx)
     }
 
@@ -467,10 +517,25 @@ object SomaBiometricsEngine : SensorEventListener {
                         }
 
                         if ((newElapsed / 15) != (prevElapsed / 15)) {
-                            WorkoutForegroundService.updateNotification(ctx, hr, zone, newElapsed)
+                            WorkoutForegroundService.updateNotification(ctx, hr, zone, newElapsed, snap.wasAutoStarted)
                         }
                         if ((newElapsed / 30) != (prevElapsed / 30)) {
                             requestComplicationUpdate(ctx)
+                        }
+                        if (snap.wasAutoStarted) {
+                            val movingRecently = (lastSignificantMoveElapsedMs > 0L && nowElapsedMs - lastSignificantMoveElapsedMs <= 30_000L) ||
+                                rollingAccelMag > 0.45
+                            val lowHrThreshold = (snap.weekly.maxHr * 0.55f).roundToInt()
+                            if (hr in 35 until lowHrThreshold && !movingRecently) {
+                                autoIdleSeconds += deltaSec
+                                if (autoIdleSeconds >= 300) {
+                                    Log.i(TAG, "Auto-Cardio resting for 5m; auto-finishing workout")
+                                    finishWorkoutNow(ctx)
+                                    return@launch
+                                }
+                            } else if (hr >= lowHrThreshold || movingRecently) {
+                                autoIdleSeconds = 0
+                            }
                         }
                     }
 
@@ -565,6 +630,9 @@ object SomaBiometricsEngine : SensorEventListener {
                         (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toDouble()
                     )
                     rollingAccelMag = rollingAccelMag * 0.85 + mag * 0.15
+                    if (mag > 0.65 || rollingAccelMag > 0.45) {
+                        lastSignificantMoveElapsedMs = SystemClock.elapsedRealtime()
+                    }
                 }
             }
 
@@ -818,6 +886,19 @@ object SomaBiometricsEngine : SensorEventListener {
                 ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
             vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+
+    private fun vibrateDouble(ctx: Context) {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 120), -1))
         }
     }
 }

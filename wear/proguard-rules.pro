@@ -1,5 +1,6 @@
 -keep class com.aisling.somawatch.WearDataLayerService { *; }
 -keep class com.aisling.somawatch.WorkoutForegroundService { *; }
+-keep class com.aisling.somawatch.SomaMonitorService { *; }
 -keep class com.aisling.somawatch.CardioZoneComplicationService { *; }
 -keep class com.aisling.somawatch.NoiseComplicationService { *; }
 -keep class com.aisling.somawatch.OtaInstallReceiver { *; }

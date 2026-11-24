@@ -30,6 +30,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.roundToInt
@@ -57,6 +58,7 @@ object SomaNoiseMonitor {
     private var lastAlertTimeMs = 0L
     private var lastComplicationPushMs = 0L
     private var lastComplicationDb = 0
+    private val isSamplingLock = AtomicBoolean(false)
 
     @Volatile
     var isVoiceRecordingActive: Boolean = false
@@ -78,8 +80,8 @@ object SomaNoiseMonitor {
                 isMonitoring = bgOn
             )
         }
-        if (bgOn && backgroundJob?.isActive != true) {
-            startBackgroundMonitoring(ctx)
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            ensureBackgroundSampling(ctx)
         }
     }
 
@@ -108,6 +110,7 @@ object SomaNoiseMonitor {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return
         }
+        ensureBackgroundSampling(ctx)
         if (foregroundJob?.isActive == true) return
         foregroundJob = scope.launch {
             while (isActive) {
@@ -124,6 +127,27 @@ object SomaNoiseMonitor {
         foregroundJob = null
     }
 
+    /**
+     * Keeps the Noise watch-face complication fresh in the background (duty-cycled 0.7s every 45s)
+     * whenever RECORD_AUDIO is granted, even if loud-noise vibration alerts are off.
+     */
+    fun ensureBackgroundSampling(context: Context) {
+        val ctx = context.applicationContext
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        if (backgroundJob?.isActive == true) return
+        backgroundJob = scope.launch {
+            while (isActive) {
+                val intervalMs = if (_state.value.isMonitoring) 40_000L else 55_000L
+                delay(intervalMs)
+                if (!isVoiceRecordingActive && foregroundJob?.isActive != true) {
+                    sampleAndUpdate(ctx, durationMs = 750L, triggerAlerts = _state.value.isMonitoring)
+                }
+            }
+        }
+    }
+
     fun startBackgroundMonitoring(context: Context) {
         val ctx = context.applicationContext
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -134,21 +158,15 @@ object SomaNoiseMonitor {
         val threshold = SomaBiometricsStore.getNoiseThresholdDb(ctx)
         SomaBiometricsStore.setNoiseAlertEnabled(ctx, true)
         _state.update { it.copy(isMonitoring = true, thresholdDb = threshold) }
-
-        backgroundJob?.cancel()
-        backgroundJob = scope.launch {
-            while (isActive) {
-                if (!isVoiceRecordingActive) {
-                    sampleAndUpdate(ctx, durationMs = 1400L, triggerAlerts = true)
-                }
-                delay(45_000L)
+        ensureBackgroundSampling(ctx)
+        scope.launch {
+            if (!isVoiceRecordingActive) {
+                sampleAndUpdate(ctx, durationMs = 900L, triggerAlerts = true)
             }
         }
     }
 
     fun stopBackgroundMonitoring(context: Context) {
-        backgroundJob?.cancel()
-        backgroundJob = null
         SomaBiometricsStore.setNoiseAlertEnabled(context.applicationContext, false)
         _state.update { it.copy(isMonitoring = false, isLoudAlert = false) }
     }
@@ -160,15 +178,30 @@ object SomaNoiseMonitor {
         }
         scope.launch {
             if (!isVoiceRecordingActive) {
-                sampleAndUpdate(ctx, durationMs = 900L, triggerAlerts = true)
+                sampleAndUpdate(ctx, durationMs = 900L, triggerAlerts = _state.value.isMonitoring)
             }
         }
     }
 
-    private suspend fun sampleAndUpdate(ctx: Context, durationMs: Long, triggerAlerts: Boolean) {
+    suspend fun sampleOnceForComplication(context: Context): Int? {
+        val ctx = context.applicationContext
+        if (isVoiceRecordingActive) return null
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return null
+        }
+        return sampleAndUpdate(ctx, durationMs = 450L, triggerAlerts = _state.value.isMonitoring, pushComplication = false)
+    }
+
+    private suspend fun sampleAndUpdate(
+        ctx: Context,
+        durationMs: Long,
+        triggerAlerts: Boolean,
+        pushComplication: Boolean = true
+    ): Int? {
+        if (!isSamplingLock.compareAndSet(false, true)) return null
         _state.update { it.copy(isSamplingNow = true) }
         try {
-            val db = measureSampleDb(durationMs) ?: return
+            val db = measureSampleDb(durationMs) ?: return null
             val threshold = _state.value.thresholdDb
             val isLoud = db >= threshold
             SomaBiometricsStore.saveNoiseReading(ctx, db, System.currentTimeMillis())
@@ -179,7 +212,9 @@ object SomaNoiseMonitor {
                     isLoudAlert = isLoud
                 )
             }
-            requestComplicationUpdate(ctx, db = db)
+            if (pushComplication) {
+                requestComplicationUpdate(ctx, db = db, force = abs(db - lastComplicationDb) >= 2)
+            }
 
             if (isLoud && triggerAlerts) {
                 val confirmDb = measureSampleDb(2500L) ?: db
@@ -192,7 +227,9 @@ object SomaNoiseMonitor {
                             isLoudAlert = true
                         )
                     }
-                    requestComplicationUpdate(ctx, db = confirmDb, force = true)
+                    if (pushComplication) {
+                        requestComplicationUpdate(ctx, db = confirmDb, force = true)
+                    }
                     maybeTriggerLoudAlert(ctx, confirmDb, threshold)
                 } else {
                     _state.update { cur ->
@@ -202,17 +239,22 @@ object SomaNoiseMonitor {
                             isLoudAlert = false
                         )
                     }
-                    requestComplicationUpdate(ctx, db = confirmDb)
+                    if (pushComplication) {
+                        requestComplicationUpdate(ctx, db = confirmDb, force = abs(confirmDb - lastComplicationDb) >= 2)
+                    }
                 }
+                return confirmDb
             }
+            return db
         } finally {
+            isSamplingLock.set(false)
             _state.update { it.copy(isSamplingNow = false) }
         }
     }
 
     private fun requestComplicationUpdate(ctx: Context, db: Int = _state.value.currentDb, force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (!force && abs(db - lastComplicationDb) < 2 && now - lastComplicationPushMs < 15_000L) {
+        if (!force && abs(db - lastComplicationDb) < 2 && now - lastComplicationPushMs < 50_000L) {
             return
         }
         lastComplicationDb = db

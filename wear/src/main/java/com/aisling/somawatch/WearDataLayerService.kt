@@ -98,13 +98,14 @@ class WearDataLayerService : WearableListenerService() {
             }
             "/soma/voice_transcribed" -> {
                 vibrate(90)
-                SomaWearState.setSendingAudio(false)
                 if (payload.startsWith("ERR:")) {
                     // Keep saved .m4a intact so the user can retry with 1 tap!
+                    val errText = payload.removePrefix("ERR:").trim().ifBlank { "Gemini error" }
                     SomaWearState.refreshPendingAudio(this)
-                    SomaWearState.updateStatus(payload.removePrefix("ERR:").trim())
+                    SomaWearState.markVoiceFailed(errText)
+                    SomaWearState.updateStatus(errText)
                 } else {
-                    SomaWearState.deleteLastSentAudioOnSuccess(this)
+                    SomaWearState.markVoiceSucceeded(this)
                     SomaWearState.updateStatus("Gemini transcribed")
                     SomaWearState.setPendingVoicePrompt(payload)
                 }

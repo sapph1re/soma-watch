@@ -1,7 +1,15 @@
 package com.aisling.somawatch
 
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -20,7 +28,17 @@ data class OtaUiState(
     val versionLabel: String? = null
 )
 
+enum class VoiceSendStatus {
+    IDLE,
+    SENDING,
+    TRANSCRIBING,
+    FAILED
+}
+
 object SomaWearState {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var transcriptionTimeoutJob: Job? = null
+
     private val _statusMessage = MutableStateFlow("Ready")
     val statusMessage: StateFlow<String> = _statusMessage
 
@@ -39,26 +57,74 @@ object SomaWearState {
     private val _pendingAudioCount = MutableStateFlow(0)
     val pendingAudioCount: StateFlow<Int> = _pendingAudioCount
 
-    private val _isSendingAudio = MutableStateFlow(false)
-    val isSendingAudio: StateFlow<Boolean> = _isSendingAudio
+    private val _voiceSendStatus = MutableStateFlow(VoiceSendStatus.IDLE)
+    val voiceSendStatus: StateFlow<VoiceSendStatus> = _voiceSendStatus
+
+    private val _voiceErrorText = MutableStateFlow<String?>(null)
+    val voiceErrorText: StateFlow<String?> = _voiceErrorText
 
     @Volatile
     var lastSentAudioPath: String? = null
 
-    fun refreshPendingAudio(context: android.content.Context) {
-        _pendingAudioCount.value = WearVoiceRecorder.listPendingFiles(context).size
+    fun refreshPendingAudio(context: Context) {
+        val count = WearVoiceRecorder.listPendingFiles(context).size
+        _pendingAudioCount.value = count
+        if (count == 0) {
+            transcriptionTimeoutJob?.cancel()
+            transcriptionTimeoutJob = null
+            _voiceSendStatus.value = VoiceSendStatus.IDLE
+            _voiceErrorText.value = null
+        } else if (_voiceSendStatus.value == VoiceSendStatus.IDLE) {
+            // Leftover unsent/unconfirmed audio from an earlier session
+            _voiceSendStatus.value = VoiceSendStatus.FAILED
+            _voiceErrorText.value = "Previous voice note unsent"
+        }
     }
 
-    fun setSendingAudio(sending: Boolean) {
-        _isSendingAudio.value = sending
+    fun markVoiceSending() {
+        transcriptionTimeoutJob?.cancel()
+        transcriptionTimeoutJob = null
+        _voiceSendStatus.value = VoiceSendStatus.SENDING
+        _voiceErrorText.value = null
     }
 
-    fun deleteLastSentAudioOnSuccess(context: android.content.Context) {
+    fun markVoiceTranscribing() {
+        _voiceSendStatus.value = VoiceSendStatus.TRANSCRIBING
+        _voiceErrorText.value = null
+        transcriptionTimeoutJob?.cancel()
+        transcriptionTimeoutJob = scope.launch {
+            delay(45_000L)
+            if (_voiceSendStatus.value == VoiceSendStatus.TRANSCRIBING) {
+                _voiceSendStatus.value = VoiceSendStatus.FAILED
+                _voiceErrorText.value = "Timed out • Tap to retry"
+                _statusMessage.value = "Gemini timeout • Tap Retry"
+            }
+        }
+    }
+
+    fun markVoiceFailed(reason: String) {
+        transcriptionTimeoutJob?.cancel()
+        transcriptionTimeoutJob = null
+        _voiceSendStatus.value = VoiceSendStatus.FAILED
+        _voiceErrorText.value = reason.ifBlank { "Transcription failed" }
+    }
+
+    fun markVoiceSucceeded(context: Context) {
+        transcriptionTimeoutJob?.cancel()
+        transcriptionTimeoutJob = null
         lastSentAudioPath?.let { path ->
-            WearVoiceRecorder.deletePendingFile(java.io.File(path))
+            WearVoiceRecorder.deletePendingFile(File(path))
             lastSentAudioPath = null
         }
-        refreshPendingAudio(context)
+        val remaining = WearVoiceRecorder.listPendingFiles(context).size
+        _pendingAudioCount.value = remaining
+        if (remaining == 0) {
+            _voiceSendStatus.value = VoiceSendStatus.IDLE
+            _voiceErrorText.value = null
+        } else {
+            _voiceSendStatus.value = VoiceSendStatus.FAILED
+            _voiceErrorText.value = "Older unsent note ($remaining)"
+        }
     }
 
     fun updateStatus(msg: String) {

@@ -2,8 +2,10 @@ package com.aisling.somawatch
 
 import android.app.PendingIntent
 import android.content.Intent
+import androidx.wear.watchface.complications.data.ColorRamp
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.GoalProgressComplicationData
 import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.RangedValueComplicationData
@@ -13,30 +15,46 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 
 class CardioZoneComplicationService : SuspendingComplicationDataSourceService() {
 
+    private val emeraldRamp = ColorRamp(
+        colors = intArrayOf(0xFF059669.toInt(), 0xFF10B981.toInt(), 0xFF34D399.toInt()),
+        interpolated = true
+    )
+
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         return when (type) {
+            ComplicationType.GOAL_PROGRESS -> GoalProgressComplicationData.Builder(
+                value = 95f,
+                targetValue = 150f,
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: 95 of 150 min").build()
+            )
+                .setText(PlainComplicationText.Builder("95").build())
+                .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setColorRamp(emeraldRamp)
+                .build()
+
             ComplicationType.RANGED_VALUE -> RangedValueComplicationData.Builder(
                 value = 95f,
                 min = 0f,
                 max = 150f,
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: 95 of 150 min").build()
             )
-                .setText(PlainComplicationText.Builder("95m").build())
+                .setText(PlainComplicationText.Builder("95").build())
                 .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setColorRamp(emeraldRamp)
                 .build()
 
             ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("95/150").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
+                text = PlainComplicationText.Builder("95").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: 95 of 150 min").build()
             )
                 .setTitle(PlainComplicationText.Builder("Z2").build())
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("Zone 2: 95 / 150 min").build(),
-                contentDescription = PlainComplicationText.Builder("Soma Zone 2").build()
+                text = PlainComplicationText.Builder("Zone 2: 95 min").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: 95 of 150 min").build()
             )
-                .setTitle(PlainComplicationText.Builder("HIIT: 32 / 75 min").build())
+                .setTitle(PlainComplicationText.Builder("HIIT: 32 min").build())
                 .build()
 
             else -> null
@@ -59,19 +77,31 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
         )
 
         return when (request.complicationType) {
+            ComplicationType.GOAL_PROGRESS -> GoalProgressComplicationData.Builder(
+                value = z2Min.toFloat(),
+                targetValue = goal.toFloat(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
+            )
+                .setText(PlainComplicationText.Builder("$z2Min").build())
+                .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setColorRamp(emeraldRamp)
+                .setTapAction(tapAction)
+                .build()
+
             ComplicationType.RANGED_VALUE -> RangedValueComplicationData.Builder(
                 value = z2Min.toFloat().coerceAtMost(goal.toFloat()),
                 min = 0f,
                 max = goal.toFloat(),
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
-                .setText(PlainComplicationText.Builder("${z2Min}m").build())
+                .setText(PlainComplicationText.Builder("$z2Min").build())
                 .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setColorRamp(emeraldRamp)
                 .setTapAction(tapAction)
                 .build()
 
             ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("$z2Min/$goal").build(),
+                text = PlainComplicationText.Builder("$z2Min").build(),
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
                 .setTitle(PlainComplicationText.Builder("Z2").build())
@@ -79,10 +109,10 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-                text = PlainComplicationText.Builder("Zone 2: $z2Min / $goal min").build(),
+                text = PlainComplicationText.Builder("Zone 2: $z2Min min").build(),
                 contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
             )
-                .setTitle(PlainComplicationText.Builder("HIIT: ${stats.vigorousMinutes} / ${stats.vigorousGoalMin} min").build())
+                .setTitle(PlainComplicationText.Builder("HIIT: ${stats.vigorousMinutes} min").build())
                 .setTapAction(tapAction)
                 .build()
 

@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -12,6 +13,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 
 class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -34,6 +36,18 @@ class PackageReplacedReceiver : BroadcastReceiver() {
         val launchIntent = Intent(context, WearMainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("just_updated", true)
+        }
+
+        // Refresh watch face complications after OTA update
+        runCatching {
+            ComplicationDataSourceUpdateRequester.create(
+                context.applicationContext,
+                ComponentName(context.applicationContext, CardioZoneComplicationService::class.java)
+            ).requestUpdateAll()
+            ComplicationDataSourceUpdateRequester.create(
+                context.applicationContext,
+                ComponentName(context.applicationContext, NoiseComplicationService::class.java)
+            ).requestUpdateAll()
         }
 
         // Try direct launch (succeeds if exempted from BAL)

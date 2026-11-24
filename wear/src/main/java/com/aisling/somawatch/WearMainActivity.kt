@@ -111,6 +111,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 private object SomaColors {
     val Background = Color(0xFF000000)
@@ -185,6 +186,11 @@ class WearMainActivity : ComponentActivity() {
             SomaBiometricsEngine.startPassiveMonitoring(this)
         }
         SomaNoiseMonitor.startForegroundPreview(this)
+        if (SomaBiometricsEngine.state.value.phase == WorkoutPhase.IDLE &&
+            (hasHrPermission(this) || SomaMonitorService.hasMicPermission(this))
+        ) {
+            SomaMonitorService.start(this)
+        }
         val now = System.currentTimeMillis()
         if (now - lastAutoOtaCheckMs >= 20_000L) {
             lastAutoOtaCheckMs = now
@@ -238,7 +244,8 @@ fun SomaRootScreen() {
     val availableUpdate by SomaWearState.availableUpdate.collectAsState()
     val pendingPrompt by SomaWearState.pendingVoicePrompt.collectAsState()
     val pendingAudioCount by SomaWearState.pendingAudioCount.collectAsState()
-    val isSendingAudio by SomaWearState.isSendingAudio.collectAsState()
+    val voiceSendStatus by SomaWearState.voiceSendStatus.collectAsState()
+    val voiceErrorText by SomaWearState.voiceErrorText.collectAsState()
     val bio by SomaBiometricsEngine.state.collectAsState()
     val noise by SomaNoiseMonitor.state.collectAsState()
 
@@ -276,6 +283,9 @@ fun SomaRootScreen() {
         val granted = results.values.any { it } || hasHrPermission(context)
         if (granted) {
             SomaBiometricsEngine.startPassiveMonitoring(context)
+            if (SomaBiometricsEngine.state.value.phase == WorkoutPhase.IDLE) {
+                SomaMonitorService.start(context)
+            }
             if (pendingWorkoutStart) {
                 pendingWorkoutStart = false
                 SomaBiometricsEngine.startWorkout(context)
@@ -290,6 +300,11 @@ fun SomaRootScreen() {
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
+            SomaNoiseMonitor.ensureBackgroundSampling(context)
+            SomaNoiseMonitor.startForegroundPreview(context)
+            if (SomaBiometricsEngine.state.value.phase == WorkoutPhase.IDLE) {
+                SomaMonitorService.start(context)
+            }
             if (voiceRecorder.startRecording()) {
                 triggerVibration(context, 70)
                 isRecording = true
@@ -421,8 +436,10 @@ fun SomaRootScreen() {
                     otaState = otaState,
                     availableUpdate = availableUpdate,
                     pendingAudioCount = pendingAudioCount,
-                    isSendingAudio = isSendingAudio,
+                    voiceSendStatus = voiceSendStatus,
+                    voiceErrorText = voiceErrorText,
                     onRetryPendingAudio = {
+                        if (voiceSendStatus != VoiceSendStatus.FAILED) return@MainDashboardView
                         val pending = WearVoiceRecorder.listPendingFiles(context).firstOrNull()
                         if (pending != null) {
                             triggerVibration(context, 70)
@@ -439,6 +456,10 @@ fun SomaRootScreen() {
                             SomaWearState.refreshPendingAudio(context)
                             SomaWearState.updateStatus("Pending audio discarded")
                         }
+                    },
+                    onToggleAutoDetect = {
+                        triggerVibration(context, 45)
+                        SomaBiometricsEngine.setAutoDetectEnabled(context, !bio.autoDetectEnabled)
                     },
                     onStartWorkout = {
                         triggerVibration(context, 80)
@@ -520,9 +541,11 @@ private fun MainDashboardView(
     otaState: OtaUiState,
     availableUpdate: AvailableOta?,
     pendingAudioCount: Int,
-    isSendingAudio: Boolean,
+    voiceSendStatus: VoiceSendStatus,
+    voiceErrorText: String?,
     onRetryPendingAudio: () -> Unit,
     onDiscardPendingAudio: () -> Unit,
+    onToggleAutoDetect: () -> Unit,
     onStartWorkout: () -> Unit,
     onDismissAutoWorkout: () -> Unit,
     onToggleNoiseMonitor: () -> Unit,
@@ -677,8 +700,41 @@ private fun MainDashboardView(
                 }
             }
 
-            // 1d. Pending Unsent Voice Audio Retry Chip (never lose a recording on timeout!)
-            if (pendingAudioCount > 0) {
+            // 1d. Voice Transcription Status / Failure Retry Chip
+            if (voiceSendStatus == VoiceSendStatus.SENDING || voiceSendStatus == VoiceSendStatus.TRANSCRIBING) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF141B36))
+                            .border(1.dp, SomaColors.IndigoSoft.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            indicatorColor = SomaColors.Cyan,
+                            trackColor = SomaColors.SurfaceElevated,
+                            strokeWidth = 2.dp
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (voiceSendStatus == VoiceSendStatus.SENDING) "Sending voice..." else "Transcribing...",
+                                color = SomaColors.TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Gemini 2.5 Flash • Please wait",
+                                color = SomaColors.IndigoSoft,
+                                fontSize = 8.sp
+                            )
+                        }
+                    }
+                }
+            } else if (voiceSendStatus == VoiceSendStatus.FAILED && pendingAudioCount > 0) {
                 item {
                     Row(
                         modifier = Modifier
@@ -686,7 +742,7 @@ private fun MainDashboardView(
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFF2B1E08))
                             .border(1.dp, SomaColors.Amber.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
-                            .clickable(enabled = !isSendingAudio) { onRetryPendingAudio() }
+                            .clickable { onRetryPendingAudio() }
                             .padding(start = 12.dp, end = 8.dp, top = 9.dp, bottom = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -699,33 +755,33 @@ private fun MainDashboardView(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (isSendingAudio) "Sending audio..." else "Retry Voice ($pendingAudioCount)",
+                                text = "Retry Voice ($pendingAudioCount)",
                                 color = SomaColors.TextPrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = if (isSendingAudio) "Syncing via Data Layer" else "Saved locally • Tap to resend",
+                                text = voiceErrorText ?: "Tap to retry",
                                 color = SomaColors.Amber.copy(alpha = 0.85f),
-                                fontSize = 8.sp
+                                fontSize = 8.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        if (!isSendingAudio) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.3f))
-                                    .clickable { onDiscardPendingAudio() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = "Discard",
-                                    tint = SomaColors.TextSecondary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.3f))
+                                .clickable { onDiscardPendingAudio() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Discard",
+                                tint = SomaColors.TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
                     }
                 }
@@ -733,12 +789,17 @@ private fun MainDashboardView(
 
             // 2. Live Biometrics Hero Card (HR + Zone + HRV + Continuous HRR / tau)
             item {
+                val heroBorder = if (bio.currentHr > 0 && bio.currentZone >= 2) {
+                    liveZoneColor.copy(alpha = 0.45f)
+                } else {
+                    SomaColors.Border
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(SomaColors.Surface)
-                        .border(1.dp, SomaColors.Border, RoundedCornerShape(18.dp))
+                        .border(1.dp, heroBorder, RoundedCornerShape(18.dp))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -913,7 +974,7 @@ private fun MainDashboardView(
                     },
                     secondaryLabel = {
                         Text(
-                            text = "Always-on display",
+                            text = if (bio.autoDetectEnabled) "Auto in Zone 2 • Always-on" else "Always-on display",
                             color = Color.White.copy(alpha = 0.82f),
                             fontSize = 10.sp,
                             maxLines = 1
@@ -922,7 +983,7 @@ private fun MainDashboardView(
                 )
             }
 
-            // 4. Weekly Cardio Budget (Zone 2 + Zone 4-5)
+            // 4. Weekly Cardio Budget (Circular Gauges for Zone 2 & HIIT + Auto-Cardio toggle)
             item {
                 val w = bio.weekly
                 Column(
@@ -932,7 +993,7 @@ private fun MainDashboardView(
                         .background(SomaColors.Surface)
                         .border(1.dp, SomaColors.Border, RoundedCornerShape(16.dp))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -946,30 +1007,55 @@ private fun MainDashboardView(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
                         )
-                        Text(
-                            text = "Max ${w.maxHr}",
-                            color = SomaColors.TextMuted,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.SemiBold
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (bio.autoDetectEnabled) SomaColors.EmeraldContainer
+                                    else SomaColors.SurfaceElevated
+                                )
+                                .border(
+                                    1.dp,
+                                    if (bio.autoDetectEnabled) SomaColors.Emerald.copy(alpha = 0.45f)
+                                    else SomaColors.Border,
+                                    RoundedCornerShape(50)
+                                )
+                                .clickable { onToggleAutoDetect() }
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (bio.autoDetectEnabled) "AUTO Z2 ON" else "AUTO Z2 OFF",
+                                color = if (bio.autoDetectEnabled) SomaColors.Emerald else SomaColors.TextMuted,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ZoneCircularGauge(
+                            label = "Zone 2",
+                            minutes = w.zone2Minutes,
+                            goal = w.zone2GoalMin,
+                            color = SomaColors.Emerald
+                        )
+                        ZoneCircularGauge(
+                            label = "HIIT Z4–5",
+                            minutes = w.vigorousMinutes,
+                            goal = w.vigorousGoalMin,
+                            color = SomaColors.Coral
                         )
                     }
-                    ZoneProgressRow(
-                        label = "Zone 2",
-                        minutes = w.zone2Minutes,
-                        goal = w.zone2GoalMin,
-                        color = SomaColors.Emerald
-                    )
-                    ZoneProgressRow(
-                        label = "Z4–5 HIIT",
-                        minutes = w.vigorousMinutes,
-                        goal = w.vigorousGoalMin,
-                        color = SomaColors.Coral
-                    )
                     if (w.zone3Seconds > 0L) {
                         Text(
                             text = "Zone 3 (Tempo): ${formatZoneDuration(w.zone3Seconds.toInt())}",
                             color = SomaColors.Amber.copy(alpha = 0.85f),
-                            fontSize = 9.sp
+                            fontSize = 9.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
@@ -1010,17 +1096,29 @@ private fun MainDashboardView(
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = when {
-                                    noise.currentDb > 0 -> "${noise.currentDb} dB"
-                                    noise.isSamplingNow -> "Sampling..."
-                                    else -> "Tap • dB"
-                                },
-                                color = SomaColors.TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                style = TextStyle(fontFeatureSettings = "tnum")
-                            )
+                            if (noise.currentDb > 0) {
+                                Text(
+                                    text = "${noise.currentDb}",
+                                    color = SomaColors.TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    style = TextStyle(fontFeatureSettings = "tnum")
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "dB",
+                                    color = SomaColors.TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else {
+                                Text(
+                                    text = if (noise.isSamplingNow) "Sampling..." else "Tap • dB",
+                                    color = SomaColors.TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         Box(
                             modifier = Modifier
@@ -1035,7 +1133,7 @@ private fun MainDashboardView(
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = if (noise.isMonitoring) "AUTO ON" else "ALERT >${noise.thresholdDb}",
+                                text = if (noise.isMonitoring) "ALERT ON" else "ALERT >${noise.thresholdDb}",
                                 color = if (noise.isMonitoring) SomaColors.Emerald else SomaColors.TextSecondary,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold
@@ -1170,42 +1268,52 @@ private fun MetricMiniBadge(label: String, value: String, accent: Color) {
 }
 
 @Composable
-private fun ZoneProgressRow(label: String, minutes: Int, goal: Int, color: Color) {
+private fun ZoneCircularGauge(label: String, minutes: Int, goal: Int, color: Color) {
     val targetFraction = (minutes.toFloat() / goal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
     val animatedFraction by animateFloatAsState(
-        targetValue = targetFraction.coerceAtLeast(if (minutes > 0) 0.04f else 0f),
-        animationSpec = tween(350),
-        label = "zoneBar"
+        targetValue = if (minutes > 0) targetFraction.coerceAtLeast(0.04f) else 0f,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "zoneCircularBar"
     )
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = label, color = SomaColors.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "${minutes} / ${goal}m",
-                color = color,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                style = TextStyle(fontFeatureSettings = "tnum")
-            )
-        }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(5.dp)
-                .clip(RoundedCornerShape(50))
-                .background(SomaColors.SurfaceElevated)
+            modifier = Modifier.size(58.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(animatedFraction)
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(color)
+            CircularProgressIndicator(
+                progress = animatedFraction,
+                modifier = Modifier.fillMaxSize(),
+                startAngle = 270f,
+                endAngle = 270f,
+                indicatorColor = color,
+                trackColor = SomaColors.SurfaceElevated,
+                strokeWidth = 5.dp
             )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "$minutes",
+                    color = SomaColors.TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+                Text(
+                    text = "min",
+                    color = SomaColors.TextMuted,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
+        Text(
+            text = label,
+            color = color,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -1262,7 +1370,7 @@ private fun ActiveWorkoutScreen(
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 Text(
-                    text = zoneLabel(bio.currentZone),
+                    text = if (bio.wasAutoStarted) "AUTO • ${zoneLabel(bio.currentZone)}" else zoneLabel(bio.currentZone),
                     color = activeZoneColor,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.ExtraBold
@@ -1931,19 +2039,24 @@ private suspend fun checkOtaVersionSilently(context: Context) {
     }
 }
 
+private val voiceSendInFlight = AtomicBoolean(false)
+
 /**
  * Resilient Dual-Path Voice Audio Sender (ZERO ChannelClient Error 15: TIMEOUT!):
  * - NEVER deletes [audioFile] on failure so the user can retry in 1 tap.
+ * - Uses [voiceSendInFlight] atomic guard so concurrent/duplicate sends never happen.
  * - For <= 72 KB (~24s at 24kbps AAC): fast direct MessageClient path.
  * - For > 72 KB OR if MessageClient fails/times out: GMS DataClient Asset store-and-forward,
  *   which reliably wakes and delivers to OnePlus 15 even across Doze / brief BT drops.
  */
 private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = withContext(Dispatchers.IO) {
-    SomaWearState.setSendingAudio(true)
+    if (!voiceSendInFlight.compareAndSet(false, true)) return@withContext
+    SomaWearState.markVoiceSending()
     SomaWearState.lastSentAudioPath = audioFile.absolutePath
     SomaWearState.refreshPendingAudio(context)
     try {
         if (!audioFile.exists() || audioFile.length() < 500) {
+            SomaWearState.markVoiceFailed("Audio file missing")
             SomaWearState.updateStatus("Audio file missing")
             SomaWearState.refreshPendingAudio(context)
             return@withContext
@@ -1977,13 +2090,15 @@ private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = w
             Wearable.getDataClient(context).putDataItem(request).await()
         }
 
-        SomaWearState.updateStatus("Audio queued ($sizeKb KB) → Gemini...")
+        SomaWearState.markVoiceTranscribing()
+        SomaWearState.updateStatus("Transcribing with Gemini...")
     } catch (e: Exception) {
         // File stays safely in filesDir/pending_voice/ for 1-tap retry!
+        SomaWearState.markVoiceFailed("Send failed • Tap to retry")
         SomaWearState.updateStatus("Send failed • Tap Retry Voice")
         SomaWearState.refreshPendingAudio(context)
     } finally {
-        SomaWearState.setSendingAudio(false)
+        voiceSendInFlight.set(false)
     }
 }
 
