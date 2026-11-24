@@ -58,6 +58,9 @@ data class BiometricsUiState(
     val recoveryElapsedSec: Int = 0,
     val hrr1Drop: Int? = null,
     val hrr2Drop: Int? = null,
+    // Continuous Recovery Kinetics (Imai T30 / intra-workout bouts)
+    val latestBout: RecoveryBout? = null,
+    val sessionRecoveryBouts: List<RecoveryBout> = emptyList(),
     // Auto-detected dynamic/strength workout prompt
     val autoWorkoutSuggestion: String? = null,
     val isMovingActively: Boolean = false,
@@ -72,6 +75,8 @@ data class BiometricsUiState(
         maxHr = 185,
         lastHrr1 = null,
         lastHrr2 = null,
+        lastTauSec = null,
+        lastProjectedHrr60 = null,
         lastHrvMs = null
     )
 )
@@ -116,6 +121,7 @@ object SomaBiometricsEngine : SensorEventListener {
     private var passiveRecoverySec = 0
     private var passiveHrr1: Int? = null
     private var lastTelemetrySyncMs = 0L
+    private val continuousHrrTracker = ContinuousHrrTracker()
 
     fun dismissAutoWorkoutSuggestion() {
         _state.update { it.copy(autoWorkoutSuggestion = null) }
@@ -163,6 +169,33 @@ object SomaBiometricsEngine : SensorEventListener {
                 if (s.currentHr > 35 && now - lastTelemetrySyncMs >= 180_000L) {
                     lastTelemetrySyncMs = now
                     syncTelemetrySampleToPhone(ctx, s)
+                }
+
+                // Continuous Recovery Kinetics (Imai T30 / mono-exponential tau) — runs BOTH during workouts & daily life!
+                if (s.currentHr > 40 && s.phase != WorkoutPhase.HRR_RECOVERY) {
+                    val bout = continuousHrrTracker.onSample(
+                        hr = s.currentHr,
+                        accelMag = rollingAccelMag,
+                        isWorkoutActive = (s.phase == WorkoutPhase.ACTIVE),
+                        nowMs = now
+                    )
+                    if (bout != null) {
+                        SomaBiometricsStore.saveRecoveryBout(ctx, bout)
+                        val refreshed = SomaBiometricsStore.load(ctx)
+                        val cur = _state.value
+                        val updatedBouts = if (cur.phase == WorkoutPhase.ACTIVE) {
+                            (cur.sessionRecoveryBouts + bout).takeLast(20)
+                        } else {
+                            cur.sessionRecoveryBouts
+                        }
+                        _state.value = cur.copy(
+                            latestBout = bout,
+                            sessionRecoveryBouts = updatedBouts,
+                            weekly = refreshed
+                        )
+                        syncRecoveryBoutToPhone(ctx, bout)
+                        Log.i(TAG, "RecoveryBout detected: peak=${bout.peakHr} drop=-${bout.dropBpm} in ${bout.observedSec}s -> tau=${bout.tauSec}s eHRR60=-${bout.projectedHrr60} (${bout.confidence}/${bout.restType})")
+                    }
                 }
 
                 if (s.phase != WorkoutPhase.IDLE) {
@@ -236,6 +269,7 @@ object SomaBiometricsEngine : SensorEventListener {
         lastHrSum = 0L
         lastHrCount = 0L
         ibiWindowMs.clear()
+        continuousHrrTracker.reset()
 
         _state.update { cur ->
             val initialHr = cur.currentHr
@@ -252,7 +286,8 @@ object SomaBiometricsEngine : SensorEventListener {
                 recoveryStartHr = 0,
                 recoveryElapsedSec = 0,
                 hrr1Drop = null,
-                hrr2Drop = null
+                hrr2Drop = null,
+                sessionRecoveryBouts = emptyList()
             )
         }
 
@@ -715,6 +750,35 @@ object SomaBiometricsEngine : SensorEventListener {
                         .sendMessage(
                             node.id,
                             "/soma/telemetry_sample",
+                            json.toString().toByteArray(Charsets.UTF_8)
+                        ).await()
+                }
+            }
+        }
+    }
+
+    private fun syncRecoveryBoutToPhone(ctx: Context, bout: RecoveryBout) {
+        scope.launch {
+            runCatching {
+                val json = JSONObject().apply {
+                    put("timestamp", bout.timestampMs)
+                    put("peakHr", bout.peakHr)
+                    put("endHr", bout.endHr)
+                    put("dropBpm", bout.dropBpm)
+                    put("observedSec", bout.observedSec)
+                    put("tauSec", bout.tauSec)
+                    put("slopeBpmPerMin", bout.slopeBpmPerMin)
+                    put("projectedHrr60", bout.projectedHrr60)
+                    put("confidence", bout.confidence)
+                    put("restType", bout.restType)
+                    put("context", bout.context)
+                }
+                val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(ctx)
+                        .sendMessage(
+                            node.id,
+                            "/soma/recovery_bout",
                             json.toString().toByteArray(Charsets.UTF_8)
                         ).await()
                 }

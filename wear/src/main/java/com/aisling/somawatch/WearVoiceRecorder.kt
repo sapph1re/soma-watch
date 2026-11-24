@@ -13,8 +13,8 @@ class WearVoiceRecorder(private val context: Context) {
     fun startRecording(): Boolean {
         stopAndDiscard()
         return try {
-            val file = File(context.cacheDir, "soma_voice_prompt.m4a")
-            if (file.exists()) file.delete()
+            val dir = pendingDir(context)
+            val file = File(dir, "voice_${System.currentTimeMillis()}.m4a")
             outputFile = file
 
             val mr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -29,13 +29,13 @@ class WearVoiceRecorder(private val context: Context) {
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioSamplingRate(16000)
                 setAudioChannels(1)
-                setAudioEncodingBitRate(32000)
+                setAudioEncodingBitRate(24000) // ~3 KB/sec -> 20s note fits inside fast MessageClient!
                 setOutputFile(file.absolutePath)
                 prepare()
                 start()
             }
             recorder = mr
-            Log.i(TAG, "Started voice recording -> ${file.absolutePath}")
+            Log.i(TAG, "Started persistent voice recording -> ${file.name}")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start MediaRecorder", e)
@@ -51,15 +51,19 @@ class WearVoiceRecorder(private val context: Context) {
             mr.stop()
             mr.release()
             val file = outputFile
+            outputFile = null
             if (file != null && file.exists() && file.length() > 500) {
-                Log.i(TAG, "Stopped recording: ${file.length()} bytes")
+                Log.i(TAG, "Saved persistent voice recording: ${file.name} (${file.length()} bytes)")
                 file
             } else {
+                runCatching { file?.delete() }
                 null
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping MediaRecorder", e)
             runCatching { mr.release() }
+            runCatching { outputFile?.delete() }
+            outputFile = null
             null
         }
     }
@@ -77,5 +81,22 @@ class WearVoiceRecorder(private val context: Context) {
 
     companion object {
         private const val TAG = "SomaVoiceRecorder"
+
+        fun pendingDir(context: Context): File {
+            val dir = File(context.filesDir, "pending_voice")
+            if (!dir.exists()) dir.mkdirs()
+            return dir
+        }
+
+        fun listPendingFiles(context: Context): List<File> {
+            return pendingDir(context)
+                .listFiles { f -> f.isFile && f.name.endsWith(".m4a") && f.length() > 500 }
+                ?.sortedByDescending { it.lastModified() }
+                ?: emptyList()
+        }
+
+        fun deletePendingFile(file: File) {
+            runCatching { if (file.exists()) file.delete() }
+        }
     }
 }

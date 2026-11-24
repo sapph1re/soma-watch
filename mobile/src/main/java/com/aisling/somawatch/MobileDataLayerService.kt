@@ -2,6 +2,9 @@ package com.aisling.somawatch
 
 import android.util.Log
 import com.google.android.gms.wearable.ChannelClient
+import com.google.android.gms.wearable.DataEvent
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
@@ -26,6 +29,43 @@ class MobileDataLayerService : WearableListenerService() {
             }
             "/soma/debug_hr_raw" -> {
                 Log.i(TAG, "WATCH_HR_RAW_PACKET: [$payload]")
+            }
+            "/soma/voice_audio_bytes" -> {
+                val rawBytes = messageEvent.data
+                val nodeId = messageEvent.sourceNodeId
+                scope.launch {
+                    val audioFile = File(cacheDir, "wrist_msg_${System.currentTimeMillis()}.m4a")
+                    try {
+                        audioFile.writeBytes(rawBytes)
+                        transcribeAndReply(audioFile, nodeId)
+                    } finally {
+                        runCatching { audioFile.delete() }
+                    }
+                }
+            }
+            "/soma/recovery_bout" -> {
+                runCatching {
+                    val j = org.json.JSONObject(payload)
+                    val db = SomaHealthDb.get(this)
+                    db.insertRecoveryBout(
+                        timestamp = j.optLong("timestamp", System.currentTimeMillis()),
+                        peakHr = j.optInt("peakHr", 0),
+                        endHr = j.optInt("endHr", 0),
+                        dropBpm = j.optInt("dropBpm", 0),
+                        observedSec = j.optInt("observedSec", 0),
+                        tauSec = j.optInt("tauSec", 0),
+                        slopeBpmMin = j.optInt("slopeBpmPerMin", 0),
+                        projectedHrr60 = j.optInt("projectedHrr60", 0),
+                        confidence = j.optString("confidence", "extrapolated_t30"),
+                        restType = j.optString("restType", "passive"),
+                        context = j.optString("context", "daily")
+                    )
+                    db.writeExportFile(this)
+                    SomaMobileState.setHealthDbStats(db.loadStats())
+                    SomaMobileState.recordWatchMessage(
+                        "Recovery (${j.optString("context")}): τ=${j.optInt("tauSec")}s, eHRR60=-${j.optInt("projectedHrr60")} bpm"
+                    )
+                }
             }
             "/soma/voice_prompt" -> {
                 SomaMobileState.recordWatchMessage("🎙️ From watch: \"$payload\"")
@@ -155,10 +195,43 @@ class MobileDataLayerService : WearableListenerService() {
         }
     }
 
+    override fun onDataChanged(dataEvents: DataEventBuffer) {
+        super.onDataChanged(dataEvents)
+        for (event in dataEvents) {
+            if (event.type == DataEvent.TYPE_CHANGED && event.dataItem.uri.path == "/soma/voice_asset") {
+                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+                val asset = dataMap.getAsset("audio") ?: continue
+                val sourceNodeId = event.dataItem.uri.host
+                scope.launch {
+                    val audioFile = File(cacheDir, "wrist_asset_${System.currentTimeMillis()}.m4a")
+                    try {
+                        SomaMobileState.setJulesStatus("Receiving voice asset from Galaxy Watch 8...")
+                        val fdResult = Wearable.getDataClient(this@MobileDataLayerService)
+                            .getFdForAsset(asset)
+                            .await()
+                        fdResult.inputStream.use { input ->
+                            audioFile.outputStream().use { output ->
+                                input.copyTo(output)
+                                output.flush()
+                            }
+                        }
+                        transcribeAndReply(audioFile, sourceNodeId)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed reading voice asset", e)
+                        SomaMobileState.setJulesStatus("Audio asset error: ${e.localizedMessage}")
+                        replyToWatch(sourceNodeId, "ERR:${e.localizedMessage}")
+                    } finally {
+                        runCatching { audioFile.delete() }
+                    }
+                }
+            }
+        }
+    }
+
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         super.onChannelOpened(channel)
         if (channel.path == "/soma/voice_audio") {
-            Log.i(TAG, "Receiving voice audio from watch for Gemini transcription...")
+            Log.i(TAG, "Receiving voice audio over ChannelClient...")
             SomaMobileState.setJulesStatus("Receiving audio from Galaxy Watch 8...")
             scope.launch {
                 val audioFile = File(cacheDir, "wrist_voice_prompt.m4a")
@@ -173,44 +246,48 @@ class MobileDataLayerService : WearableListenerService() {
                             output.flush()
                         }
                     }
-
-                    val sizeKb = audioFile.length() / 1024
-                    SomaMobileState.setJulesStatus("Audio ($sizeKb KB) → Gemini 2.5 Flash...")
-                    val result = GeminiVoiceClient.transcribeAudio(this@MobileDataLayerService, audioFile)
-
-                    val replyPayload = result.fold(
-                        onSuccess = { text ->
-                            SomaMobileState.recordWatchMessage("Gemini: \"$text\"")
-                            SomaMobileState.setJulesStatus("Transcribed → awaiting confirmation on watch")
-                            text
-                        },
-                        onFailure = { err ->
-                            val msg = err.localizedMessage ?: "Gemini error"
-                            SomaMobileState.setJulesStatus("Gemini error: $msg")
-                            "ERR:$msg"
-                        }
-                    )
-
-                    Wearable.getMessageClient(this@MobileDataLayerService)
-                        .sendMessage(
-                            channel.nodeId,
-                            "/soma/voice_transcribed",
-                            replyPayload.toByteArray(Charsets.UTF_8)
-                        ).await()
+                    transcribeAndReply(audioFile, channel.nodeId)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed receiving/transcribing watch audio", e)
                     SomaMobileState.setJulesStatus("Audio error: ${e.localizedMessage}")
-                    runCatching {
-                        Wearable.getMessageClient(this@MobileDataLayerService)
-                            .sendMessage(
-                                channel.nodeId,
-                                "/soma/voice_transcribed",
-                                "ERR:${e.localizedMessage}".toByteArray(Charsets.UTF_8)
-                            ).await()
-                    }
+                    replyToWatch(channel.nodeId, "ERR:${e.localizedMessage}")
                 } finally {
                     runCatching { audioFile.delete() }
                 }
+            }
+        }
+    }
+
+    private suspend fun transcribeAndReply(audioFile: File, targetNodeId: String?) {
+        val sizeKb = (audioFile.length() / 1024).coerceAtLeast(1)
+        SomaMobileState.setJulesStatus("Audio ($sizeKb KB) → Gemini 2.5 Flash...")
+        val result = GeminiVoiceClient.transcribeAudio(this@MobileDataLayerService, audioFile)
+        val replyPayload = result.fold(
+            onSuccess = { text ->
+                SomaMobileState.recordWatchMessage("Gemini: \"$text\"")
+                SomaMobileState.setJulesStatus("Transcribed → awaiting confirmation on watch")
+                text
+            },
+            onFailure = { err ->
+                val msg = err.localizedMessage ?: "Gemini error"
+                SomaMobileState.setJulesStatus("Gemini error: $msg")
+                "ERR:$msg"
+            }
+        )
+        replyToWatch(targetNodeId, replyPayload)
+    }
+
+    private suspend fun replyToWatch(nodeId: String?, payload: String) {
+        runCatching {
+            val targets = if (!nodeId.isNullOrBlank()) {
+                listOf(nodeId)
+            } else {
+                Wearable.getNodeClient(this@MobileDataLayerService).connectedNodes.await().map { it.id }
+            }
+            targets.forEach { id ->
+                Wearable.getMessageClient(this@MobileDataLayerService)
+                    .sendMessage(id, "/soma/voice_transcribed", payload.toByteArray(Charsets.UTF_8))
+                    .await()
             }
         }
     }

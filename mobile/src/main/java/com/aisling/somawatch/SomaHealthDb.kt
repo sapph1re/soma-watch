@@ -108,9 +108,35 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
             )
             """.trimIndent()
         )
+        createRecoveryBoutsTable(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    private fun createRecoveryBoutsTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS recovery_bouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                peak_hr INTEGER NOT NULL,
+                end_hr INTEGER NOT NULL,
+                drop_bpm INTEGER NOT NULL,
+                observed_sec INTEGER NOT NULL,
+                tau_sec INTEGER NOT NULL,
+                slope_bpm_min INTEGER NOT NULL,
+                projected_hrr60 INTEGER NOT NULL,
+                confidence TEXT NOT NULL,
+                rest_type TEXT NOT NULL,
+                context TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            createRecoveryBoutsTable(db)
+        }
+    }
 
     fun insertWorkout(s: SyncedBiometricsSummary, z3Sec: Int = 0) {
         val cv = ContentValues().apply {
@@ -156,6 +182,35 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
             if (hrr2 != null) put("hrr2", hrr2)
         }
         writableDatabase.insert("hrr_events", null, cv)
+    }
+
+    fun insertRecoveryBout(
+        timestamp: Long,
+        peakHr: Int,
+        endHr: Int,
+        dropBpm: Int,
+        observedSec: Int,
+        tauSec: Int,
+        slopeBpmMin: Int,
+        projectedHrr60: Int,
+        confidence: String,
+        restType: String,
+        context: String
+    ) {
+        val cv = ContentValues().apply {
+            put("timestamp", timestamp)
+            put("peak_hr", peakHr)
+            put("end_hr", endHr)
+            put("drop_bpm", dropBpm)
+            put("observed_sec", observedSec)
+            put("tau_sec", tauSec)
+            put("slope_bpm_min", slopeBpmMin)
+            put("projected_hrr60", projectedHrr60)
+            put("confidence", confidence)
+            put("rest_type", restType)
+            put("context", context)
+        }
+        writableDatabase.insert("recovery_bouts", null, cv)
     }
 
     fun insertNoiseEvent(timestamp: Long, dbVal: Int, thresholdDb: Int) {
@@ -364,6 +419,29 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
         }
         root.put("hrr_events", hrrArr)
 
+        val boutsArr = JSONArray()
+        db.rawQuery(
+            "SELECT timestamp, peak_hr, end_hr, drop_bpm, observed_sec, tau_sec, slope_bpm_min, projected_hrr60, confidence, rest_type, context FROM recovery_bouts ORDER BY timestamp DESC LIMIT 200",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                boutsArr.put(JSONObject().apply {
+                    put("timestamp", isoFmt.format(Date(c.getLong(0))))
+                    put("peak_hr", c.getInt(1))
+                    put("end_hr", c.getInt(2))
+                    put("drop_bpm", c.getInt(3))
+                    put("observed_sec", c.getInt(4))
+                    put("tau_sec", c.getInt(5))
+                    put("slope_bpm_per_min", c.getInt(6))
+                    put("projected_hrr60", c.getInt(7))
+                    put("confidence", c.getString(8))
+                    put("rest_type", c.getString(9))
+                    put("context", c.getString(10))
+                })
+            }
+        }
+        root.put("continuous_recovery_bouts", boutsArr)
+
         val noiseArr = JSONArray()
         db.rawQuery("SELECT timestamp, db, threshold_db FROM noise_events ORDER BY timestamp DESC LIMIT 200", null).use { c ->
             while (c.moveToNext()) {
@@ -421,7 +499,7 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
 
     companion object {
         private const val DB_NAME = "soma_health.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
 
         @Volatile
         private var instance: SomaHealthDb? = null

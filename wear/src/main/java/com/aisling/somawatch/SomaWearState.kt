@@ -36,6 +36,31 @@ object SomaWearState {
     private val _pendingVoicePrompt = MutableStateFlow<String?>(null)
     val pendingVoicePrompt: StateFlow<String?> = _pendingVoicePrompt
 
+    private val _pendingAudioCount = MutableStateFlow(0)
+    val pendingAudioCount: StateFlow<Int> = _pendingAudioCount
+
+    private val _isSendingAudio = MutableStateFlow(false)
+    val isSendingAudio: StateFlow<Boolean> = _isSendingAudio
+
+    @Volatile
+    var lastSentAudioPath: String? = null
+
+    fun refreshPendingAudio(context: android.content.Context) {
+        _pendingAudioCount.value = WearVoiceRecorder.listPendingFiles(context).size
+    }
+
+    fun setSendingAudio(sending: Boolean) {
+        _isSendingAudio.value = sending
+    }
+
+    fun deleteLastSentAudioOnSuccess(context: android.content.Context) {
+        lastSentAudioPath?.let { path ->
+            WearVoiceRecorder.deletePendingFile(java.io.File(path))
+            lastSentAudioPath = null
+        }
+        refreshPendingAudio(context)
+    }
+
     fun updateStatus(msg: String) {
         _statusMessage.value = msg
     }

@@ -51,8 +51,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SelfImprovement
-import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Warning
@@ -101,6 +101,8 @@ import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
+import com.google.android.gms.wearable.Asset
+import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -153,6 +155,7 @@ class WearMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         SomaBiometricsEngine.init(this)
         SomaNoiseMonitor.init(this)
+        SomaWearState.refreshPendingAudio(this)
         handleUpdateIntent(intent)
         setContent {
             MaterialTheme {
@@ -177,6 +180,7 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        SomaWearState.refreshPendingAudio(this)
         if (hasHrPermission(this)) {
             SomaBiometricsEngine.startPassiveMonitoring(this)
         }
@@ -233,6 +237,8 @@ fun SomaRootScreen() {
     val otaState by SomaWearState.otaState.collectAsState()
     val availableUpdate by SomaWearState.availableUpdate.collectAsState()
     val pendingPrompt by SomaWearState.pendingVoicePrompt.collectAsState()
+    val pendingAudioCount by SomaWearState.pendingAudioCount.collectAsState()
+    val isSendingAudio by SomaWearState.isSendingAudio.collectAsState()
     val bio by SomaBiometricsEngine.state.collectAsState()
     val noise by SomaNoiseMonitor.state.collectAsState()
 
@@ -414,6 +420,26 @@ fun SomaRootScreen() {
                     lastSyncInfo = lastSyncInfo,
                     otaState = otaState,
                     availableUpdate = availableUpdate,
+                    pendingAudioCount = pendingAudioCount,
+                    isSendingAudio = isSendingAudio,
+                    onRetryPendingAudio = {
+                        val pending = WearVoiceRecorder.listPendingFiles(context).firstOrNull()
+                        if (pending != null) {
+                            triggerVibration(context, 70)
+                            scope.launch { sendVoiceAudioToPhone(context, pending) }
+                        } else {
+                            SomaWearState.refreshPendingAudio(context)
+                        }
+                    },
+                    onDiscardPendingAudio = {
+                        val pending = WearVoiceRecorder.listPendingFiles(context).firstOrNull()
+                        if (pending != null) {
+                            triggerVibration(context, 40)
+                            WearVoiceRecorder.deletePendingFile(pending)
+                            SomaWearState.refreshPendingAudio(context)
+                            SomaWearState.updateStatus("Pending audio discarded")
+                        }
+                    },
                     onStartWorkout = {
                         triggerVibration(context, 80)
                         SomaBiometricsEngine.dismissAutoWorkoutSuggestion()
@@ -478,10 +504,6 @@ fun SomaRootScreen() {
                         SomaWearState.updateStatus("Checking for updates...")
                         scope.launch { checkOtaVersionSilently(context) }
                     },
-                    onPingPhone = {
-                        triggerVibration(context, 60)
-                        scope.launch { sendPingToPhone(context) }
-                    },
                     onDismissBanner = { SomaWearState.finishOtaMessage(null) }
                 )
             }
@@ -497,6 +519,10 @@ private fun MainDashboardView(
     lastSyncInfo: String,
     otaState: OtaUiState,
     availableUpdate: AvailableOta?,
+    pendingAudioCount: Int,
+    isSendingAudio: Boolean,
+    onRetryPendingAudio: () -> Unit,
+    onDiscardPendingAudio: () -> Unit,
     onStartWorkout: () -> Unit,
     onDismissAutoWorkout: () -> Unit,
     onToggleNoiseMonitor: () -> Unit,
@@ -504,7 +530,6 @@ private fun MainDashboardView(
     onStartVoice: () -> Unit,
     onInstallOta: () -> Unit,
     onCheckOtaManual: () -> Unit,
-    onPingPhone: () -> Unit,
     onDismissBanner: () -> Unit
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 1)
@@ -652,7 +677,61 @@ private fun MainDashboardView(
                 }
             }
 
-            // 2. Live Biometrics Hero Card (HR + Zone + HRV + HRR)
+            // 1d. Pending Unsent Voice Audio Retry Chip (never lose a recording on timeout!)
+            if (pendingAudioCount > 0) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF2B1E08))
+                            .border(1.dp, SomaColors.Amber.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                            .clickable(enabled = !isSendingAudio) { onRetryPendingAudio() }
+                            .padding(start = 12.dp, end = 8.dp, top = 9.dp, bottom = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Retry Audio",
+                            tint = SomaColors.Amber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (isSendingAudio) "Sending audio..." else "Retry Voice ($pendingAudioCount)",
+                                color = SomaColors.TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (isSendingAudio) "Syncing via Data Layer" else "Saved locally • Tap to resend",
+                                color = SomaColors.Amber.copy(alpha = 0.85f),
+                                fontSize = 8.sp
+                            )
+                        }
+                        if (!isSendingAudio) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.3f))
+                                    .clickable { onDiscardPendingAudio() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Discard",
+                                    tint = SomaColors.TextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Live Biometrics Hero Card (HR + Zone + HRV + Continuous HRR / tau)
             item {
                 Column(
                     modifier = Modifier
@@ -726,9 +805,22 @@ private fun MainDashboardView(
                                 .height(22.dp)
                                 .background(SomaColors.Border)
                         )
+                        val hrrLabel = when {
+                            bio.weekly.lastHrr1 != null -> "HRR-1"
+                            bio.weekly.lastTauSec != null -> "τ / eHRR"
+                            else -> "HRR"
+                        }
+                        val hrrValue = when {
+                            bio.weekly.lastHrr1 != null && bio.weekly.lastTauSec != null ->
+                                "-${bio.weekly.lastHrr1} • ${bio.weekly.lastTauSec}s"
+                            bio.weekly.lastHrr1 != null -> "-${bio.weekly.lastHrr1} bpm"
+                            bio.weekly.lastProjectedHrr60 != null && bio.weekly.lastTauSec != null ->
+                                "~-${bio.weekly.lastProjectedHrr60} • ${bio.weekly.lastTauSec}s"
+                            else -> "Auto"
+                        }
                         MetricMiniBadge(
-                            label = "HRR-1",
-                            value = bio.weekly.lastHrr1?.let { "-$it bpm" } ?: "After run",
+                            label = hrrLabel,
+                            value = hrrValue,
                             accent = SomaColors.Emerald
                         )
                     }
@@ -1029,39 +1121,15 @@ private fun MainDashboardView(
                 )
             }
 
-            // 7. Compact Phone Ping & Status Footer
+            // 7. Compact Status Footer (Ping Phone button removed per user request)
             item {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(SomaColors.SurfaceElevated)
-                            .border(1.dp, SomaColors.Border, RoundedCornerShape(50))
-                            .clickable { onPingPhone() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Smartphone,
-                            contentDescription = "Ping Phone",
-                            tint = SomaColors.Cyan,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Ping Phone",
-                            color = SomaColors.TextPrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
                     Text(
                         text = statusMessage,
                         color = SomaColors.TextSecondary,
@@ -1259,7 +1327,16 @@ private fun ActiveWorkoutScreen(
                     maxLines = 1,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
-                if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
+                if (bio.latestBout != null && bio.sessionRecoveryBouts.isNotEmpty()) {
+                    val b = bio.latestBout
+                    Text(
+                        text = "Recovery τ=${b.tauSec}s (~-${b.projectedHrr60} bpm) • ${bio.sessionRecoveryBouts.size}x",
+                        color = SomaColors.Emerald,
+                        fontSize = 8.sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                } else if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
                     Text(
                         text = "Z1 ${formatCompactMinSec(bio.sessionZone1Sec)}  •  Z3 ${formatCompactMinSec(bio.sessionZone3Sec)}",
                         color = SomaColors.TextMuted,
@@ -1854,30 +1931,59 @@ private suspend fun checkOtaVersionSilently(context: Context) {
     }
 }
 
+/**
+ * Resilient Dual-Path Voice Audio Sender (ZERO ChannelClient Error 15: TIMEOUT!):
+ * - NEVER deletes [audioFile] on failure so the user can retry in 1 tap.
+ * - For <= 72 KB (~24s at 24kbps AAC): fast direct MessageClient path.
+ * - For > 72 KB OR if MessageClient fails/times out: GMS DataClient Asset store-and-forward,
+ *   which reliably wakes and delivers to OnePlus 15 even across Doze / brief BT drops.
+ */
 private suspend fun sendVoiceAudioToPhone(context: Context, audioFile: File) = withContext(Dispatchers.IO) {
+    SomaWearState.setSendingAudio(true)
+    SomaWearState.lastSentAudioPath = audioFile.absolutePath
+    SomaWearState.refreshPendingAudio(context)
     try {
-        val nodes = Wearable.getNodeClient(context).connectedNodes.await()
-        if (nodes.isEmpty()) {
-            SomaWearState.updateStatus("Phone not found")
+        if (!audioFile.exists() || audioFile.length() < 500) {
+            SomaWearState.updateStatus("Audio file missing")
+            SomaWearState.refreshPendingAudio(context)
             return@withContext
         }
-        val sizeKb = audioFile.length() / 1024
-        SomaWearState.updateStatus("Audio ($sizeKb KB) → Gemini...")
-        val targetNode = nodes.first()
-        val channelClient = Wearable.getChannelClient(context)
-        val channel = channelClient.openChannel(targetNode.id, "/soma/voice_audio").await()
-        val outputStream = channelClient.getOutputStream(channel).await()
-        audioFile.inputStream().use { input ->
-            outputStream.use { output ->
-                input.copyTo(output)
-                output.flush()
+        val bytes = audioFile.readBytes()
+        val sizeKb = (bytes.size / 1024).coerceAtLeast(1)
+        SomaWearState.updateStatus("Sending $sizeKb KB to Gemini...")
+
+        var sentViaFastMessage = false
+        if (bytes.size <= 72_000) {
+            runCatching {
+                val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+                val target = nodes.firstOrNull()
+                if (target != null) {
+                    Wearable.getMessageClient(context)
+                        .sendMessage(target.id, "/soma/voice_audio_bytes", bytes)
+                        .await()
+                    sentViaFastMessage = true
+                }
             }
         }
-        SomaWearState.updateStatus("Gemini transcribing...")
+
+        if (!sentViaFastMessage) {
+            // Store-and-forward Asset via DataClient — resilient to Doze & BT hiccups!
+            val asset = Asset.createFromBytes(bytes)
+            val request = PutDataMapRequest.create("/soma/voice_asset").apply {
+                dataMap.putAsset("audio", asset)
+                dataMap.putLong("ts", System.currentTimeMillis())
+                dataMap.putString("fileName", audioFile.name)
+            }.asPutDataRequest().setUrgent()
+            Wearable.getDataClient(context).putDataItem(request).await()
+        }
+
+        SomaWearState.updateStatus("Audio queued ($sizeKb KB) → Gemini...")
     } catch (e: Exception) {
-        SomaWearState.updateStatus("Audio error: ${e.localizedMessage}")
+        // File stays safely in filesDir/pending_voice/ for 1-tap retry!
+        SomaWearState.updateStatus("Send failed • Tap Retry Voice")
+        SomaWearState.refreshPendingAudio(context)
     } finally {
-        runCatching { audioFile.delete() }
+        SomaWearState.setSendingAudio(false)
     }
 }
 
@@ -1894,25 +2000,6 @@ private suspend fun sendVoicePromptToPhone(context: Context, prompt: String) {
                 .sendMessage(node.id, "/soma/voice_prompt", prompt.toByteArray(Charsets.UTF_8))
                 .await()
         }
-    } catch (e: Exception) {
-        SomaWearState.updateStatus("Error: ${e.localizedMessage}")
-    }
-}
-
-private suspend fun sendPingToPhone(context: Context) {
-    try {
-        val nodes = Wearable.getNodeClient(context).connectedNodes.await()
-        if (nodes.isEmpty()) {
-            SomaWearState.updateStatus("Phone not found")
-            return
-        }
-        val msg = "Ping from Soma Watch v${BuildConfig.VERSION_NAME}"
-        nodes.forEach { node ->
-            Wearable.getMessageClient(context)
-                .sendMessage(node.id, "/soma/ping", msg.toByteArray(Charsets.UTF_8))
-                .await()
-        }
-        SomaWearState.updateStatus("Ping → ${nodes.first().displayName}")
     } catch (e: Exception) {
         SomaWearState.updateStatus("Error: ${e.localizedMessage}")
     }

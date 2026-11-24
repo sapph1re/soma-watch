@@ -14,6 +14,8 @@ data class WeeklyCardioStats(
     val maxHr: Int,
     val lastHrr1: Int?,
     val lastHrr2: Int?,
+    val lastTauSec: Int?,
+    val lastProjectedHrr60: Int?,
     val lastHrvMs: Int?
 ) {
     val zone2Minutes: Int get() = (zone2Seconds / 60.0).roundToInt()
@@ -48,6 +50,8 @@ object SomaBiometricsStore {
 
         val hrr1 = prefs.getInt("last_hrr1", -1).takeIf { it >= 0 }
         val hrr2 = prefs.getInt("last_hrr2", -1).takeIf { it >= 0 }
+        val tau = prefs.getInt("last_tau_sec", -1).takeIf { it > 0 }
+        val projHrr = prefs.getInt("last_proj_hrr60", -1).takeIf { it > 0 }
         val hrv = prefs.getInt("last_hrv", -1).takeIf { it > 0 }
 
         return WeeklyCardioStats(
@@ -60,6 +64,8 @@ object SomaBiometricsStore {
             maxHr = prefs.getInt("max_hr", 185),
             lastHrr1 = hrr1,
             lastHrr2 = hrr2,
+            lastTauSec = tau,
+            lastProjectedHrr60 = projHrr,
             lastHrvMs = hrv
         )
     }
@@ -92,6 +98,17 @@ object SomaBiometricsStore {
         val editor = prefs.edit()
         if (hrr1 != null) editor.putInt("last_hrr1", hrr1)
         if (hrr2 != null) editor.putInt("last_hrr2", hrr2)
+        editor.apply()
+    }
+
+    fun saveRecoveryBout(context: Context, bout: RecoveryBout) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+            .putInt("last_tau_sec", bout.tauSec)
+            .putInt("last_proj_hrr60", bout.projectedHrr60)
+        if (bout.confidence == "measured_60s") {
+            editor.putInt("last_hrr1", bout.projectedHrr60)
+        }
         editor.apply()
     }
 
