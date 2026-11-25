@@ -760,11 +760,14 @@ object SomaBiometricsEngine : SensorEventListener {
 
     private fun requestComplicationUpdate(ctx: Context) {
         runCatching {
-            val requester = ComplicationDataSourceUpdateRequester.create(
+            ComplicationDataSourceUpdateRequester.create(
                 ctx,
                 ComponentName(ctx, CardioZoneComplicationService::class.java)
-            )
-            requester.requestUpdateAll()
+            ).requestUpdateAll()
+            ComplicationDataSourceUpdateRequester.create(
+                ctx,
+                ComponentName(ctx, CardioRingComplicationService::class.java)
+            ).requestUpdateAll()
         }
     }
 

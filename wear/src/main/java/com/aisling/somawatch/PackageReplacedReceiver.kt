@@ -46,6 +46,10 @@ class PackageReplacedReceiver : BroadcastReceiver() {
             ).requestUpdateAll()
             ComplicationDataSourceUpdateRequester.create(
                 context.applicationContext,
+                ComponentName(context.applicationContext, CardioRingComplicationService::class.java)
+            ).requestUpdateAll()
+            ComplicationDataSourceUpdateRequester.create(
+                context.applicationContext,
                 ComponentName(context.applicationContext, NoiseComplicationService::class.java)
             ).requestUpdateAll()
         }

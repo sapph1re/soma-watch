@@ -2,6 +2,7 @@ package com.aisling.somawatch
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.ColorRamp
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
@@ -9,6 +10,9 @@ import androidx.wear.watchface.complications.data.GoalProgressComplicationData
 import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.RangedValueComplicationData
+import androidx.wear.watchface.complications.data.ShortTextComplicationData
+import androidx.wear.watchface.complications.data.SmallImage
+import androidx.wear.watchface.complications.data.SmallImageType
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
 
@@ -18,6 +22,17 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
         colors = intArrayOf(0xFF059669.toInt(), 0xFF10B981.toInt(), 0xFF34D399.toInt()),
         interpolated = true
     )
+
+    private fun buildMiniRingImage(z2Min: Int, goalMin: Int): SmallImage {
+        val activeBmp = Zone2RingRenderer.renderMiniRingBitmap(z2Min, goalMin, sizePx = 96, ambient = false)
+        val ambientBmp = Zone2RingRenderer.renderMiniRingBitmap(z2Min, goalMin, sizePx = 96, ambient = true)
+        return SmallImage.Builder(
+            image = Icon.createWithBitmap(activeBmp),
+            type = SmallImageType.PHOTO
+        )
+            .setAmbientImage(Icon.createWithBitmap(ambientBmp))
+            .build()
+    }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         return when (type) {
@@ -40,6 +55,14 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 .setText(PlainComplicationText.Builder("95").build())
                 .setTitle(PlainComplicationText.Builder("Z2").build())
                 .setColorRamp(emeraldRamp)
+                .build()
+
+            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
+                text = PlainComplicationText.Builder("95").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: 95 of 150 min").build()
+            )
+                .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setSmallImage(buildMiniRingImage(95, 150))
                 .build()
 
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
@@ -89,6 +112,15 @@ class CardioZoneComplicationService : SuspendingComplicationDataSourceService() 
                 .setText(PlainComplicationText.Builder("$z2Min").build())
                 .setTitle(PlainComplicationText.Builder("Z2").build())
                 .setColorRamp(emeraldRamp)
+                .setTapAction(tapAction)
+                .build()
+
+            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
+                text = PlainComplicationText.Builder("$z2Min").build(),
+                contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goal min").build()
+            )
+                .setTitle(PlainComplicationText.Builder("Z2").build())
+                .setSmallImage(buildMiniRingImage(z2Min, goal))
                 .setTapAction(tapAction)
                 .build()
 
