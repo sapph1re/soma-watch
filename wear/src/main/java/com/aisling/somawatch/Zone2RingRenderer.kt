@@ -10,7 +10,7 @@ import android.graphics.Typeface
 
 /**
  * Renders crisp, anti-aliased circular progress ring Bitmaps for Wear OS complications.
- * Used both as a full-size SMALL_IMAGE complication ("Soma Zone 2 Ring") and as a mini
+ * Used both as a full-size SMALL_IMAGE complication ("Soma Cardio Ring") and as a mini
  * progress donut icon inside SHORT_TEXT slots when a watch face doesn't support RANGED_VALUE.
  */
 object Zone2RingRenderer {
@@ -19,7 +19,8 @@ object Zone2RingRenderer {
         z2Min: Int,
         goalMin: Int,
         sizePx: Int = 192,
-        ambient: Boolean = false
+        ambient: Boolean = false,
+        centerLabel: String = "LOAD"
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -83,7 +84,7 @@ object Zone2RingRenderer {
         val valueBaseline = valueCenterY - (valueMetrics.ascent + valueMetrics.descent) / 2f
         canvas.drawText(valueText, cx, valueBaseline, valuePaint)
 
-        // Dim secondary "Z2" label underneath
+        // Dim secondary label underneath (e.g. "LOAD")
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (ambient) 0x88FFFFFF.toInt() else 0xFF94A3B8.toInt()
             textAlign = Paint.Align.CENTER
@@ -93,7 +94,7 @@ object Zone2RingRenderer {
         val labelMetrics = labelPaint.fontMetrics
         val labelCenterY = cy + sizePx * 0.23f
         val labelBaseline = labelCenterY - (labelMetrics.ascent + labelMetrics.descent) / 2f
-        canvas.drawText("Z2", cx, labelBaseline, labelPaint)
+        canvas.drawText(centerLabel, cx, labelBaseline, labelPaint)
 
         return bitmap
     }

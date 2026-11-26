@@ -282,7 +282,8 @@ fun SomaCompanionScreen() {
 
                 if (lastBio != null) {
                     val b = lastBio!!
-                    val z2Frac = (b.weeklyZ2Min.toFloat() / b.weeklyZ2Goal.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    val loadFrac = (b.weeklyCardioLoadMin.toFloat() / b.weeklyCardioLoadGoal.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    val aeroFrac = (b.weeklyAerobicMin.toFloat() / b.weeklyZ2Goal.coerceAtLeast(1)).coerceIn(0f, 1f)
                     val vigFrac = (b.weeklyVigMin.toFloat() / b.weeklyVigGoal.coerceAtLeast(1)).coerceIn(0f, 1f)
 
                     Row(
@@ -290,20 +291,52 @@ fun SomaCompanionScreen() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Zone 2 (Aerobic)",
+                            text = "Blueprint Cardio Load",
+                            color = CompanionColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${b.weeklyCardioLoadMin} / ${b.weeklyCardioLoadGoal} eq (${(loadFrac * 100).toInt()}%)",
+                            color = CompanionColors.Cyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { loadFrac },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = CompanionColors.Cyan,
+                        trackColor = CompanionColors.SlateButton
+                    )
+                    Text(
+                        text = "Weighted eq.min: Z2 ×1.0 • Z3 ×1.5 • Z4–5 ×2.0",
+                        color = CompanionColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Aerobic Z2–Z3 (Z2 ${b.weeklyZ2Min}m + Z3 ${b.weeklyZ3Min}m)",
                             color = CompanionColors.TextPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "${b.weeklyZ2Min} / ${b.weeklyZ2Goal} min (${(z2Frac * 100).toInt()}%)",
+                            text = "${b.weeklyAerobicMin} / ${b.weeklyZ2Goal} min (${(aeroFrac * 100).toInt()}%)",
                             color = CompanionColors.Emerald,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
                     LinearProgressIndicator(
-                        progress = { z2Frac },
+                        progress = { aeroFrac },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
@@ -345,7 +378,8 @@ fun SomaCompanionScreen() {
                         if (b.hrvMs > 0) append("HRV: ${b.hrvMs}ms")
                     }
                     val zonesText = buildString {
-                        append("Z2 ${formatMinSec(b.sessionZ2Sec)}")
+                        append("Load +${b.sessionCardioLoadMin} eq")
+                        append(" • Z2 ${formatMinSec(b.sessionZ2Sec)}")
                         if (b.sessionZ3Sec > 0) append(" • Z3 ${formatMinSec(b.sessionZ3Sec)}")
                         append(" • HIIT ${formatMinSec(b.sessionVigSec)}")
                         if (b.sessionZ1Sec > 0) append(" • Z1 ${formatMinSec(b.sessionZ1Sec)}")

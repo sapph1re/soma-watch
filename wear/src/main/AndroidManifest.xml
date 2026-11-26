@@ -64,7 +64,7 @@
             android:name=".CardioZoneComplicationService"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:label="Soma Zone 2"
+            android:label="Soma Cardio Load"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
                 <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
@@ -81,7 +81,7 @@
             android:name=".CardioRingComplicationService"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:label="Soma Zone 2 Ring"
+            android:label="Soma Cardio Ring"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
                 <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />

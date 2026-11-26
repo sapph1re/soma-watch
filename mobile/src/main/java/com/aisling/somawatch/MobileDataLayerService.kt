@@ -88,7 +88,7 @@ class MobileDataLayerService : WearableListenerService() {
                     SomaMobileState.setHealthDbStats(db.loadStats())
                     SomaMobileState.setLastBioSummary(summary)
                     SomaMobileState.recordWatchMessage(
-                        "Workout: ${summary.durationSec / 60}m • Avg ${summary.avgHr} BPM • Z2 ${summary.weeklyZ2Min}/${summary.weeklyZ2Goal}m"
+                        "Workout: ${summary.durationSec / 60}m • Avg ${summary.avgHr} BPM • Load ${summary.weeklyCardioLoadMin}/${summary.weeklyCardioLoadGoal} eq (Z2-3 ${summary.weeklyAerobicMin}m)"
                     )
                 }
             }

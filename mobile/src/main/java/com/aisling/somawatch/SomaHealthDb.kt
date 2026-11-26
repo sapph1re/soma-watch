@@ -389,6 +389,14 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
         val workoutsArr = JSONArray()
         db.rawQuery("SELECT timestamp, duration_sec, avg_hr, peak_hr, hrv_ms, hrr1, hrr2, z2_sec, z3_sec, vig_sec FROM workouts ORDER BY timestamp DESC LIMIT 200", null).use { c ->
             while (c.moveToNext()) {
+                val z2Sec = c.getInt(7)
+                val z3Sec = c.getInt(8)
+                val vigSec = c.getInt(9)
+                val loadEqMin = MobileBiometricsStore.computeCardioLoadMinutes(
+                    z2Sec.toLong(),
+                    z3Sec.toLong(),
+                    vigSec.toLong()
+                )
                 workoutsArr.put(JSONObject().apply {
                     put("timestamp", isoFmt.format(Date(c.getLong(0))))
                     put("duration_sec", c.getInt(1))
@@ -397,9 +405,10 @@ class SomaHealthDb(context: Context) : SQLiteOpenHelper(
                     put("hrv_ms", if (c.isNull(4)) JSONObject.NULL else c.getInt(4))
                     put("hrr1_bpm_drop", if (c.isNull(5)) JSONObject.NULL else c.getInt(5))
                     put("hrr2_bpm_drop", if (c.isNull(6)) JSONObject.NULL else c.getInt(6))
-                    put("zone2_sec", c.getInt(7))
-                    put("zone3_sec", c.getInt(8))
-                    put("vigorous_sec", c.getInt(9))
+                    put("zone2_sec", z2Sec)
+                    put("zone3_sec", z3Sec)
+                    put("vigorous_sec", vigSec)
+                    put("cardio_load_eq_min", loadEqMin)
                 })
             }
         }

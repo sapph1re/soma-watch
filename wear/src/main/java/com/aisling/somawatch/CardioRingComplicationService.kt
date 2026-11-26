@@ -14,22 +14,22 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 
 /**
  * Dedicated SMALL_IMAGE complication that renders a custom full-size circular progress ring
- * with weekly Zone 2 minutes in the center, working even on watch face slots that do not
- * accept third-party RANGED_VALUE / GOAL_PROGRESS complications.
+ * with weekly Blueprint Cardio Load (Z2×1 + Z3×1.5 + Z4-5×2) in the center, working even on
+ * watch face slots that do not accept third-party RANGED_VALUE / GOAL_PROGRESS complications.
  */
 class CardioRingComplicationService : SuspendingComplicationDataSourceService() {
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         if (type != ComplicationType.SMALL_IMAGE) return null
-        return buildRingComplication(z2Min = 95, goalMin = 150, tapAction = null)
+        return buildRingComplication(loadMin = 145, goalMin = 300, tapAction = null)
     }
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
         if (request.complicationType != ComplicationType.SMALL_IMAGE) return null
 
         val stats = SomaBiometricsStore.load(applicationContext)
-        val z2Min = stats.zone2Minutes
-        val goal = stats.zone2GoalMin.coerceAtLeast(1)
+        val loadMin = stats.cardioLoadMinutes
+        val goal = stats.cardioLoadGoalMin.coerceAtLeast(1)
 
         val tapIntent = Intent(this, WearMainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -41,16 +41,28 @@ class CardioRingComplicationService : SuspendingComplicationDataSourceService() 
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return buildRingComplication(z2Min = z2Min, goalMin = goal, tapAction = tapAction)
+        return buildRingComplication(loadMin = loadMin, goalMin = goal, tapAction = tapAction)
     }
 
     private fun buildRingComplication(
-        z2Min: Int,
+        loadMin: Int,
         goalMin: Int,
         tapAction: PendingIntent?
     ): SmallImageComplicationData {
-        val activeBitmap = Zone2RingRenderer.renderFullRingBitmap(z2Min, goalMin, sizePx = 192, ambient = false)
-        val ambientBitmap = Zone2RingRenderer.renderFullRingBitmap(z2Min, goalMin, sizePx = 192, ambient = true)
+        val activeBitmap = Zone2RingRenderer.renderFullRingBitmap(
+            z2Min = loadMin,
+            goalMin = goalMin,
+            sizePx = 192,
+            ambient = false,
+            centerLabel = "LOAD"
+        )
+        val ambientBitmap = Zone2RingRenderer.renderFullRingBitmap(
+            z2Min = loadMin,
+            goalMin = goalMin,
+            sizePx = 192,
+            ambient = true,
+            centerLabel = "LOAD"
+        )
 
         val smallImage = SmallImage.Builder(
             image = Icon.createWithBitmap(activeBitmap),
@@ -61,7 +73,7 @@ class CardioRingComplicationService : SuspendingComplicationDataSourceService() 
 
         return SmallImageComplicationData.Builder(
             smallImage = smallImage,
-            contentDescription = PlainComplicationText.Builder("Soma Zone 2: $z2Min of $goalMin min").build()
+            contentDescription = PlainComplicationText.Builder("Soma Cardio Load: $loadMin of $goalMin eq.min").build()
         )
             .setTapAction(tapAction)
             .build()

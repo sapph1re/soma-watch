@@ -81,7 +81,15 @@ data class BiometricsUiState(
         lastProjectedHrr60 = null,
         lastHrvMs = null
     )
-)
+) {
+    val sessionAerobicSec: Int get() = sessionZone2Sec + sessionZone3Sec
+    val sessionCardioLoadMin: Int
+        get() = SomaBiometricsStore.computeCardioLoadMinutes(
+            sessionZone2Sec.toLong(),
+            sessionZone3Sec.toLong(),
+            sessionVigorousSec.toLong()
+        )
+}
 
 object SomaBiometricsEngine : SensorEventListener {
     private const val TAG = "SomaBiometrics"
@@ -786,10 +794,14 @@ object SomaBiometricsEngine : SensorEventListener {
                     put("sessionZ2Sec", s.sessionZone2Sec)
                     put("sessionZ3Sec", s.sessionZone3Sec)
                     put("sessionVigSec", s.sessionVigorousSec)
+                    put("sessionCardioLoadMin", s.sessionCardioLoadMin)
                     put("weeklyZ2Min", s.weekly.zone2Minutes)
+                    put("weeklyZ3Min", s.weekly.zone3Minutes)
                     put("weeklyZ2Goal", s.weekly.zone2GoalMin)
                     put("weeklyVigMin", s.weekly.vigorousMinutes)
                     put("weeklyVigGoal", s.weekly.vigorousGoalMin)
+                    put("weeklyCardioLoadMin", s.weekly.cardioLoadMinutes)
+                    put("weeklyCardioLoadGoal", s.weekly.cardioLoadGoalMin)
                 }
                 val nodes = Wearable.getNodeClient(ctx).connectedNodes.await()
                 nodes.forEach { node ->

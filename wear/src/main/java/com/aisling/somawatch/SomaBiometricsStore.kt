@@ -21,10 +21,27 @@ data class WeeklyCardioStats(
     val zone2Minutes: Int get() = (zone2Seconds / 60.0).roundToInt()
     val zone3Minutes: Int get() = (zone3Seconds / 60.0).roundToInt()
     val vigorousMinutes: Int get() = (vigorousSeconds / 60.0).roundToInt()
+    val aerobicSeconds: Long get() = zone2Seconds + zone3Seconds
+    val aerobicMinutes: Int get() = (aerobicSeconds / 60.0).roundToInt()
+
+    /**
+     * Bryan Johnson Blueprint / WHO MVPA weighted Cardio Load (equivalent moderate minutes):
+     * Z2 (60-70%) = 1.0x, Z3 Tempo (70-80%) = 1.5x, Z4-5 Vigorous (80-100%) = 2.0x.
+     */
+    val cardioLoadMinutes: Int
+        get() = SomaBiometricsStore.computeCardioLoadMinutes(zone2Seconds, zone3Seconds, vigorousSeconds)
+
+    val cardioLoadGoalMin: Int
+        get() = zone2GoalMin + vigorousGoalMin * 2
 }
 
 object SomaBiometricsStore {
     private const val PREFS = "soma_biometrics_v1"
+
+    fun computeCardioLoadMinutes(zone2Sec: Long, zone3Sec: Long, vigorousSec: Long): Int {
+        val weightedSec = zone2Sec * 1.0 + zone3Sec * 1.5 + vigorousSec * 2.0
+        return (weightedSec / 60.0).roundToInt()
+    }
 
     private fun currentWeekKey(): String {
         val cal = Calendar.getInstance()

@@ -109,7 +109,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import android.text.format.DateFormat
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -597,7 +600,7 @@ private fun MainDashboardView(
                     Text(
                         text = "SOMA",
                         color = SomaColors.TextPrimary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.4.sp
                     )
@@ -605,7 +608,7 @@ private fun MainDashboardView(
                     Text(
                         text = "v${BuildConfig.VERSION_NAME}",
                         color = SomaColors.TextMuted,
-                        fontSize = 9.sp
+                        fontSize = 10.sp
                     )
                 }
             }
@@ -617,7 +620,7 @@ private fun MainDashboardView(
                         onClick = onInstallOta,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp),
+                            .height(50.dp),
                         colors = ChipDefaults.gradientBackgroundChipColors(
                             startBackgroundColor = Color(0xFF0284C7),
                             endBackgroundColor = Color(0xFF0369A1)
@@ -634,7 +637,7 @@ private fun MainDashboardView(
                             Text(
                                 text = "Update Available",
                                 color = Color.White,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         },
@@ -642,7 +645,7 @@ private fun MainDashboardView(
                             Text(
                                 text = availableUpdate.label,
                                 color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 10.sp
+                                fontSize = 11.sp
                             )
                         }
                     )
@@ -679,7 +682,7 @@ private fun MainDashboardView(
                             Text(
                                 text = banner,
                                 color = SomaColors.TextPrimary,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
@@ -687,7 +690,7 @@ private fun MainDashboardView(
                             Text(
                                 text = "Tap to dismiss",
                                 color = accent.copy(alpha = 0.85f),
-                                fontSize = 8.sp
+                                fontSize = 10.sp
                             )
                         }
                         Icon(
@@ -723,13 +726,13 @@ private fun MainDashboardView(
                             Text(
                                 text = if (voiceSendStatus == VoiceSendStatus.SENDING) "Sending voice..." else "Transcribing...",
                                 color = SomaColors.TextPrimary,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "Gemini 2.5 Flash • Please wait",
                                 color = SomaColors.IndigoSoft,
-                                fontSize = 8.sp
+                                fontSize = 10.sp
                             )
                         }
                     }
@@ -757,13 +760,13 @@ private fun MainDashboardView(
                             Text(
                                 text = "Retry Voice ($pendingAudioCount)",
                                 color = SomaColors.TextPrimary,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = voiceErrorText ?: "Tap to retry",
                                 color = SomaColors.Amber.copy(alpha = 0.85f),
-                                fontSize = 8.sp,
+                                fontSize = 10.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -812,13 +815,13 @@ private fun MainDashboardView(
                             imageVector = Icons.Rounded.Favorite,
                             contentDescription = "Heart Rate",
                             tint = liveZoneColor,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (bio.currentHr > 0) "${bio.currentHr}" else "--",
                             color = SomaColors.TextPrimary,
-                            fontSize = 28.sp,
+                            fontSize = 32.sp,
                             fontWeight = FontWeight.ExtraBold,
                             style = TextStyle(fontFeatureSettings = "tnum")
                         )
@@ -826,7 +829,7 @@ private fun MainDashboardView(
                         Text(
                             text = "BPM",
                             color = SomaColors.TextMuted,
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -838,12 +841,12 @@ private fun MainDashboardView(
                                 if (bio.currentHr > 0) liveZoneColor.copy(alpha = 0.14f)
                                 else SomaColors.SurfaceElevated
                             )
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = if (bio.currentHr > 0) zoneLabel(bio.currentZone) else "Wear snug • Measuring",
                             color = if (bio.currentHr > 0) liveZoneColor else SomaColors.TextMuted,
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -912,7 +915,7 @@ private fun MainDashboardView(
                         Text(
                             text = suggestion,
                             color = Color.White,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 2,
                             modifier = Modifier.weight(1f)
@@ -942,7 +945,7 @@ private fun MainDashboardView(
                     onClick = onStartWorkout,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .height(54.dp),
                     colors = ChipDefaults.gradientBackgroundChipColors(
                         startBackgroundColor = SomaColors.Emerald,
                         endBackgroundColor = Color(0xFF059669)
@@ -967,25 +970,26 @@ private fun MainDashboardView(
                         Text(
                             text = "Run / Cardio",
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
                     },
                     secondaryLabel = {
                         Text(
-                            text = if (bio.autoDetectEnabled) "Auto in Zone 2 • Always-on" else "Always-on display",
-                            color = Color.White.copy(alpha = 0.82f),
-                            fontSize = 10.sp,
+                            text = if (bio.autoDetectEnabled) "Auto in Z2+ • Always-on" else "Always-on display",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
                             maxLines = 1
                         )
                     }
                 )
             }
 
-            // 4. Weekly Cardio Budget (Circular Gauges for Zone 2 & HIIT + Auto-Cardio toggle)
+            // 4. Weekly Blueprint Cardio Load (Z2×1 + Z3×1.5 + Z4-5×2, Aerobic Z2-3 & HIIT Z4-5 gauges)
             item {
                 val w = bio.weekly
+                val loadFrac = (w.cardioLoadMinutes.toFloat() / w.cardioLoadGoalMin.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1002,10 +1006,10 @@ private fun MainDashboardView(
                     ) {
                         Text(
                             text = "WEEKLY CARDIO",
-                            color = SomaColors.TextMuted,
-                            fontSize = 9.sp,
+                            color = SomaColors.TextSecondary,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.8.sp
                         )
                         Box(
                             modifier = Modifier
@@ -1021,24 +1025,65 @@ private fun MainDashboardView(
                                     RoundedCornerShape(50)
                                 )
                                 .clickable { onToggleAutoDetect() }
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (bio.autoDetectEnabled) "AUTO Z2 ON" else "AUTO Z2 OFF",
+                                text = if (bio.autoDetectEnabled) "AUTO ON" else "AUTO OFF",
                                 color = if (bio.autoDetectEnabled) SomaColors.Emerald else SomaColors.TextMuted,
-                                fontSize = 8.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
+
+                    // Blueprint Cardio Load Progress Bar (Z2×1.0 + Z3×1.5 + Z4-5×2.0)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Blueprint Load",
+                                color = SomaColors.TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${w.cardioLoadMinutes} / ${w.cardioLoadGoalMin} eq",
+                                color = SomaColors.Cyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                style = TextStyle(fontFeatureSettings = "tnum")
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(SomaColors.SurfaceElevated)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(if (w.cardioLoadMinutes > 0) loadFrac.coerceAtLeast(0.04f) else 0f)
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        Brush.horizontalGradient(listOf(SomaColors.Emerald, SomaColors.Cyan))
+                                    )
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ZoneCircularGauge(
-                            label = "Zone 2",
-                            minutes = w.zone2Minutes,
+                            label = "Aero Z2–3",
+                            minutes = w.aerobicMinutes,
                             goal = w.zone2GoalMin,
                             color = SomaColors.Emerald
                         )
@@ -1049,15 +1094,16 @@ private fun MainDashboardView(
                             color = SomaColors.Coral
                         )
                     }
-                    if (w.zone3Seconds > 0L) {
-                        Text(
-                            text = "Zone 3 (Tempo): ${formatZoneDuration(w.zone3Seconds.toInt())}",
-                            color = SomaColors.Amber.copy(alpha = 0.85f),
-                            fontSize = 9.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+
+                    Text(
+                        text = "Z2 ${w.zone2Minutes}m • Z3 ${w.zone3Minutes}m • Z4-5 ${w.vigorousMinutes}m",
+                        color = SomaColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
                 }
             }
 
@@ -1093,14 +1139,14 @@ private fun MainDashboardView(
                                 imageVector = Icons.Rounded.GraphicEq,
                                 contentDescription = "Sound Level",
                                 tint = dbColor,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             if (noise.currentDb > 0) {
                                 Text(
                                     text = "${noise.currentDb}",
                                     color = SomaColors.TextPrimary,
-                                    fontSize = 15.sp,
+                                    fontSize = 17.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     style = TextStyle(fontFeatureSettings = "tnum")
                                 )
@@ -1108,14 +1154,14 @@ private fun MainDashboardView(
                                 Text(
                                     text = "dB",
                                     color = SomaColors.TextMuted,
-                                    fontSize = 10.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             } else {
                                 Text(
                                     text = if (noise.isSamplingNow) "Sampling..." else "Tap • dB",
                                     color = SomaColors.TextPrimary,
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -1135,7 +1181,7 @@ private fun MainDashboardView(
                             Text(
                                 text = if (noise.isMonitoring) "ALERT ON" else "ALERT >${noise.thresholdDb}",
                                 color = if (noise.isMonitoring) SomaColors.Emerald else SomaColors.TextSecondary,
-                                fontSize = 8.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1163,12 +1209,12 @@ private fun MainDashboardView(
                         Text(
                             text = if (noise.peakDbToday > 0) "Peak ${noise.peakDbToday} dB" else "Tap to sample",
                             color = SomaColors.TextMuted,
-                            fontSize = 8.sp
+                            fontSize = 10.sp
                         )
                         Text(
                             text = "Limit ${noise.thresholdDb} dB",
                             color = SomaColors.TextMuted,
-                            fontSize = 8.sp
+                            fontSize = 10.sp
                         )
                     }
                 }
@@ -1180,7 +1226,7 @@ private fun MainDashboardView(
                     onClick = onStartVoice,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
+                        .height(52.dp),
                     colors = ChipDefaults.gradientBackgroundChipColors(
                         startBackgroundColor = SomaColors.Indigo,
                         endBackgroundColor = Color(0xFF4F46E5)
@@ -1205,15 +1251,15 @@ private fun MainDashboardView(
                         Text(
                             text = "Voice Idea",
                             color = Color.White,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     },
                     secondaryLabel = {
                         Text(
                             text = "Gemini AI → Issue",
-                            color = Color.White.copy(alpha = 0.78f),
-                            fontSize = 10.sp
+                            color = Color.White.copy(alpha = 0.82f),
+                            fontSize = 11.sp
                         )
                     }
                 )
@@ -1231,14 +1277,14 @@ private fun MainDashboardView(
                     Text(
                         text = statusMessage,
                         color = SomaColors.TextSecondary,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 2
                     )
                     Text(
                         text = lastSyncInfo,
                         color = SomaColors.TextMuted,
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 2
                     )
@@ -1254,13 +1300,13 @@ private fun MetricMiniBadge(label: String, value: String, accent: Color) {
         Text(
             text = label,
             color = SomaColors.TextMuted,
-            fontSize = 9.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
             text = value,
             color = accent,
-            fontSize = 12.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.ExtraBold,
             style = TextStyle(fontFeatureSettings = "tnum")
         )
@@ -1280,7 +1326,7 @@ private fun ZoneCircularGauge(label: String, minutes: Int, goal: Int, color: Col
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Box(
-            modifier = Modifier.size(58.dp),
+            modifier = Modifier.size(64.dp),
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator(
@@ -1290,20 +1336,20 @@ private fun ZoneCircularGauge(label: String, minutes: Int, goal: Int, color: Col
                 endAngle = 270f,
                 indicatorColor = color,
                 trackColor = SomaColors.SurfaceElevated,
-                strokeWidth = 5.dp
+                strokeWidth = 5.5.dp
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "$minutes",
                     color = SomaColors.TextPrimary,
-                    fontSize = 16.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Black,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 Text(
                     text = "min",
                     color = SomaColors.TextMuted,
-                    fontSize = 8.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -1311,9 +1357,19 @@ private fun ZoneCircularGauge(label: String, minutes: Int, goal: Int, color: Col
         Text(
             text = label,
             color = color,
-            fontSize = 9.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+private fun rememberCurrentClockText(tickKey: Any?): String {
+    val context = LocalContext.current
+    val is24Hour = remember(context) { DateFormat.is24HourFormat(context) }
+    return remember(tickKey, is24Hour) {
+        val pattern = if (is24Hour) "HH:mm" else "h:mm"
+        SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
     }
 }
 
@@ -1333,6 +1389,7 @@ private fun ActiveWorkoutScreen(
         animationSpec = tween(300),
         label = "hrRingProgress"
     )
+    val clockText = rememberCurrentClockText(bio.elapsedSeconds)
 
     Box(
         modifier = Modifier
@@ -1356,28 +1413,36 @@ private fun ActiveWorkoutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top: Elapsed Time + Zone Pill
+            // Top: Current Watch Time (compact) + Elapsed Run Time + Zone Pill
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = clockText,
+                    color = SomaColors.TextSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
                 Text(
                     text = formatDuration(bio.elapsedSeconds),
                     color = SomaColors.TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 Text(
                     text = if (bio.wasAutoStarted) "AUTO • ${zoneLabel(bio.currentZone)}" else zoneLabel(bio.currentZone),
                     color = activeZoneColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1
                 )
             }
 
-            // Middle: Giant Glanceable BPM + Live HRV + Sparkline Graph
+            // Middle: Giant Glanceable BPM + Live HRV + Sparkline Graph + Blueprint Load
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
@@ -1389,29 +1454,29 @@ private fun ActiveWorkoutScreen(
                     Text(
                         text = if (bio.currentHr > 0) "${bio.currentHr}" else "--",
                         color = SomaColors.TextPrimary,
-                        fontSize = 38.sp,
+                        fontSize = 40.sp,
                         fontWeight = FontWeight.Black,
                         style = TextStyle(fontFeatureSettings = "tnum")
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Column(modifier = Modifier.padding(bottom = 6.dp)) {
+                    Column(modifier = Modifier.padding(bottom = 5.dp)) {
                         Text(
                             text = "BPM",
                             color = activeZoneColor,
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = bio.currentHrvMs?.let { "HRV ${it}ms" } ?: "HRV --",
                             color = SomaColors.Cyan,
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             style = TextStyle(fontFeatureSettings = "tnum")
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 // Live HR Sparkline Graph with shaded Zone 2 band
                 HeartRateSparkline(
@@ -1420,36 +1485,42 @@ private fun ActiveWorkoutScreen(
                     lineColor = activeZoneColor,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(SomaColors.Surface)
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
                 )
 
                 Spacer(modifier = Modifier.height(3.dp))
 
                 Text(
-                    text = "Z2 ${formatCompactMinSec(bio.sessionZone2Sec)}  •  HIIT ${formatCompactMinSec(bio.sessionVigorousSec)}  •  Peak ${bio.peakHr}",
-                    color = SomaColors.TextSecondary,
-                    fontSize = 9.sp,
+                    text = "Z2-3 ${formatCompactMinSec(bio.sessionAerobicSec)} • Z4-5 ${formatCompactMinSec(bio.sessionVigorousSec)}",
+                    color = SomaColors.TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
                 if (bio.latestBout != null && bio.sessionRecoveryBouts.isNotEmpty()) {
                     val b = bio.latestBout
                     Text(
-                        text = "Recovery τ=${b.tauSec}s (~-${b.projectedHrr60} bpm) • ${bio.sessionRecoveryBouts.size}x",
+                        text = "Load +${bio.sessionCardioLoadMin} • τ=${b.tauSec}s (-${b.projectedHrr60})",
                         color = SomaColors.Emerald,
-                        fontSize = 8.sp,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = TextStyle(fontFeatureSettings = "tnum")
                     )
-                } else if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
+                } else {
                     Text(
-                        text = "Z1 ${formatCompactMinSec(bio.sessionZone1Sec)}  •  Z3 ${formatCompactMinSec(bio.sessionZone3Sec)}",
-                        color = SomaColors.TextMuted,
-                        fontSize = 8.sp,
+                        text = "Load +${bio.sessionCardioLoadMin} eq • Peak ${bio.peakHr}",
+                        color = SomaColors.Cyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = TextStyle(fontFeatureSettings = "tnum")
                     )
                 }
@@ -1457,13 +1528,13 @@ private fun ActiveWorkoutScreen(
 
             // Bottom: HRR Cooldown + Stop Controls
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Button(
                         onClick = onStartHrr,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(38.dp),
                         colors = ButtonDefaults.buttonColors(backgroundColor = SomaColors.EmeraldContainer)
                     ) {
                         Icon(
@@ -1476,14 +1547,14 @@ private fun ActiveWorkoutScreen(
                     Text(
                         text = "HRR",
                         color = SomaColors.Emerald,
-                        fontSize = 8.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Button(
                         onClick = onStopNow,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(38.dp),
                         colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3A121D))
                     ) {
                         Icon(
@@ -1496,7 +1567,7 @@ private fun ActiveWorkoutScreen(
                     Text(
                         text = "End",
                         color = SomaColors.Coral,
-                        fontSize = 8.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1561,6 +1632,7 @@ private fun HrrRecoveryScreen(
     } else {
         0
     }
+    val clockText = rememberCurrentClockText(bio.recoveryElapsedSec)
 
     Box(
         modifier = Modifier
@@ -1585,26 +1657,33 @@ private fun HrrRecoveryScreen(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.padding(horizontal = 20.dp)
+            modifier = Modifier.padding(horizontal = 18.dp)
         ) {
+            Text(
+                text = clockText,
+                color = SomaColors.TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                style = TextStyle(fontFeatureSettings = "tnum")
+            )
             Text(
                 text = "COOLDOWN • HRR",
                 color = SomaColors.Emerald,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.sp
+                letterSpacing = 0.8.sp
             )
             Text(
                 text = "-$liveDrop BPM",
                 color = SomaColors.TextPrimary,
-                fontSize = 28.sp,
+                fontSize = 30.sp,
                 fontWeight = FontWeight.Black,
                 style = TextStyle(fontFeatureSettings = "tnum")
             )
             Text(
-                text = "${bio.recoveryStartHr} → ${bio.currentHr} BPM  •  ${formatDuration(bio.recoveryElapsedSec)} / 02:00",
+                text = "${bio.recoveryStartHr} → ${bio.currentHr} BPM • ${formatDuration(bio.recoveryElapsedSec)}",
                 color = SomaColors.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 textAlign = TextAlign.Center,
                 style = TextStyle(fontFeatureSettings = "tnum")
             )
@@ -1612,11 +1691,11 @@ private fun HrrRecoveryScreen(
                 Text(
                     text = "HRR-1: -$d1 BPM ✓",
                     color = SomaColors.Cyan,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Button(
                 onClick = onFinishEarly,
                 modifier = Modifier.size(44.dp),
@@ -1639,78 +1718,103 @@ private fun WorkoutSummaryScreen(
     onClose: () -> Unit
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
-    ScalingLazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SomaColors.Background),
-        state = listState,
-        contentPadding = PaddingValues(top = 30.dp, bottom = 32.dp, start = 16.dp, end = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Scaffold(
+        timeText = { TimeText() },
+        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
+        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
     ) {
-        item {
-            Text(
-                text = "WORKOUT SUMMARY",
-                color = SomaColors.Emerald,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SomaColors.Surface)
-                    .border(1.dp, SomaColors.Border, RoundedCornerShape(16.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("Duration: ${formatDuration(bio.elapsedSeconds)}", color = SomaColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text("Avg / Peak HR: ${bio.avgHr} / ${bio.peakHr} BPM", color = SomaColors.TextSecondary, fontSize = 11.sp)
-                Text("Zone 2: +${formatZoneDuration(bio.sessionZone2Sec)}  •  HIIT: +${formatZoneDuration(bio.sessionVigorousSec)}", color = SomaColors.Emerald, fontSize = 11.sp)
-                if (bio.sessionZone3Sec > 0 || bio.sessionZone1Sec > 0) {
+        ScalingLazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SomaColors.Background),
+            state = listState,
+            contentPadding = PaddingValues(top = 34.dp, bottom = 36.dp, start = 14.dp, end = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                Text(
+                    text = "WORKOUT SUMMARY",
+                    color = SomaColors.Emerald,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.8.sp
+                )
+            }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SomaColors.Surface)
+                        .border(1.dp, SomaColors.Border, RoundedCornerShape(16.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
                     Text(
-                        text = buildString {
-                            if (bio.sessionZone3Sec > 0) append("Zone 3: +${formatZoneDuration(bio.sessionZone3Sec)}")
-                            if (bio.sessionZone3Sec > 0 && bio.sessionZone1Sec > 0) append("  •  ")
-                            if (bio.sessionZone1Sec > 0) append("Z1: ${formatZoneDuration(bio.sessionZone1Sec)}")
-                        },
+                        text = "Duration: ${formatDuration(bio.elapsedSeconds)}",
+                        color = SomaColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                    Text(
+                        text = "Blueprint Load: +${bio.sessionCardioLoadMin} eq.min",
+                        color = SomaColors.Cyan,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                    Text(
+                        text = "Avg / Peak HR: ${bio.avgHr} / ${bio.peakHr} BPM",
+                        color = SomaColors.TextSecondary,
+                        fontSize = 13.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                    Text(
+                        text = "Aero Z2-3: +${formatZoneDuration(bio.sessionAerobicSec)} • HIIT: +${formatZoneDuration(bio.sessionVigorousSec)}",
+                        color = SomaColors.Emerald,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                    Text(
+                        text = "Z2 ${formatZoneDuration(bio.sessionZone2Sec)} • Z3 ${formatZoneDuration(bio.sessionZone3Sec)} • Z1 ${formatZoneDuration(bio.sessionZone1Sec)}",
                         color = SomaColors.Amber,
-                        fontSize = 10.sp
+                        fontSize = 12.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum")
                     )
-                }
-                bio.currentHrvMs?.let { hrv ->
-                    Text(
-                        text = "HRV: ${hrv}ms",
-                        color = SomaColors.Cyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                if (bio.hrr1Drop != null || bio.hrr2Drop != null) {
-                    Text(
-                        text = "HRR-1: ${bio.hrr1Drop?.let { "-$it" } ?: "--"}  •  HRR-2: ${bio.hrr2Drop?.let { "-$it" } ?: "--"}",
-                        color = SomaColors.Cyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    bio.currentHrvMs?.let { hrv ->
+                        Text(
+                            text = "HRV: ${hrv}ms",
+                            color = SomaColors.Cyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (bio.hrr1Drop != null || bio.hrr2Drop != null) {
+                        Text(
+                            text = "HRR-1: ${bio.hrr1Drop?.let { "-$it" } ?: "--"} • HRR-2: ${bio.hrr2Drop?.let { "-$it" } ?: "--"}",
+                            color = SomaColors.Cyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
-        }
-        item {
-            Button(
-                onClick = onClose,
-                modifier = Modifier.size(48.dp),
-                colors = ButtonDefaults.buttonColors(backgroundColor = SomaColors.Emerald)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Check,
-                    contentDescription = "Done",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
+            item {
+                Button(
+                    onClick = onClose,
+                    modifier = Modifier.size(48.dp),
+                    colors = ButtonDefaults.buttonColors(backgroundColor = SomaColors.Emerald)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Check,
+                        contentDescription = "Done",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
         }
     }
